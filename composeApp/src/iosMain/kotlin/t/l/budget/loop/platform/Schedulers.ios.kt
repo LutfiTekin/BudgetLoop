@@ -1,6 +1,6 @@
 package t.l.budget.loop.platform
 
-actual class PlatformContext
+actual abstract class PlatformContext
 
 actual class DailyResetScheduler actual constructor(
     private val platformContext: PlatformContext,

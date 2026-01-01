@@ -17,7 +17,7 @@ class RoomConverters {
 
     @TypeConverter
     fun localDateToEpochDay(value: LocalDate?): Int? {
-        return value?.toEpochDays()
+        return value?.toEpochDays()?.toInt()
     }
 
     @TypeConverter

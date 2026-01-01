@@ -3,6 +3,8 @@ package t.l.budget.loop.domain.budget
 import kotlin.math.max
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 
 class BudgetEngine {
     fun calculateDailyRemaining(

@@ -1,6 +1,6 @@
 package t.l.budget.loop.platform
 
-expect class PlatformContext
+expect abstract class PlatformContext
 
 expect class DailyResetScheduler(platformContext: PlatformContext) {
     fun schedule()
