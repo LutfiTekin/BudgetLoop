@@ -103,7 +103,7 @@ interface FxRateDao {
     @Query(
         "SELECT * FROM fx_rates " +
             "WHERE fromCurrency = :fromCurrency AND toCurrency = :toCurrency AND source = :source " +
-            "LIMIT 1",
+            "ORDER BY asOf DESC LIMIT 1",
     )
     suspend fun getRate(
         fromCurrency: String,
