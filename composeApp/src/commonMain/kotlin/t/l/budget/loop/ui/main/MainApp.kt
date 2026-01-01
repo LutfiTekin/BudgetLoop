@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -54,6 +55,7 @@ fun MainApp(
     onboardingData: OnboardingData,
 ) {
     var screen by remember { mutableStateOf(MainScreen.TANK) }
+    var showMonthlySummary by remember { mutableStateOf(false) }
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
     val currency = normalizeCurrencyCode(onboardingData.currency.ifBlank { "USD" })
 
@@ -68,6 +70,7 @@ fun MainApp(
                     dailyBudget = Money.of(10000, currency),
                     remaining = Money.of(4250, currency),
                     netStatus = Money.of(120000, currency),
+                    onShowMonthlySummary = { showMonthlySummary = true },
                 )
                 MainScreen.EXPENSE -> AddExpenseScreen(
                     defaultCurrency = currency,
@@ -77,6 +80,12 @@ fun MainApp(
                 MainScreen.SAVINGS -> SavingsTrackerScreen(
                     defaultCurrency = currency,
                     entries = savingsEntries,
+                )
+            }
+            if (showMonthlySummary) {
+                MonthlySummaryDialog(
+                    savedAmount = Money.of(7800, currency),
+                    onDismiss = { showMonthlySummary = false },
                 )
             }
         }
@@ -143,6 +152,7 @@ private fun TankScreen(
     dailyBudget: Money,
     remaining: Money,
     netStatus: Money,
+    onShowMonthlySummary: () -> Unit,
 ) {
     val progress = if (dailyBudget.minor <= 0L) {
         0f
@@ -179,6 +189,10 @@ private fun TankScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Text("Net Status", style = MaterialTheme.typography.titleSmall)
             Text(netStatus.format(), style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(onClick = onShowMonthlySummary) {
+                Text("Monthly summary")
+            }
         }
     }
 }
@@ -372,4 +386,21 @@ private fun SavingsTrackerScreen(
             }
         }
     }
+}
+
+@Composable
+private fun MonthlySummaryDialog(
+    savedAmount: Money,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Got it")
+            }
+        },
+        title = { Text("Monthly Summary") },
+        text = { Text("You saved ${savedAmount.format()} this month.") },
+    )
 }
