@@ -56,8 +56,24 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE cardId = :cardId ORDER BY date DESC")
     suspend fun listByCard(cardId: Long): List<TransactionEntity>
 
-    @Query("SELECT * FROM transactions WHERE date BETWEEN :start AND :end ORDER BY date ASC")
-    suspend fun listBetween(start: Instant, end: Instant): List<TransactionEntity>
+    @Query(
+        "SELECT * FROM transactions " +
+            "WHERE date >= :start AND date < :endExclusive " +
+            "ORDER BY date ASC",
+    )
+    suspend fun listBetween(
+        start: Instant,
+        endExclusive: Instant,
+    ): List<TransactionEntity>
+
+    @Query(
+        "SELECT COALESCE(SUM(amountDefaultMinor), 0) FROM transactions " +
+            "WHERE date >= :start AND date < :endExclusive",
+    )
+    suspend fun sumDefaultBetween(
+        start: Instant,
+        endExclusive: Instant,
+    ): Long
 
     @Insert
     suspend fun insert(transaction: TransactionEntity): Long
