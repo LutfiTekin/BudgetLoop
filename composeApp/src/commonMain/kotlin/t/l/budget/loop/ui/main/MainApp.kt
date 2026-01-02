@@ -36,7 +36,6 @@ import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
 import t.l.budget.loop.ui.onboarding.CardDraft
 import t.l.budget.loop.ui.onboarding.OnboardingData
-import kotlin.time.Clock
 
 private enum class MainScreen {
     TANK,
@@ -59,6 +58,8 @@ fun MainApp(
     var showMonthlySummary by remember { mutableStateOf(false) }
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
     val currency = normalizeCurrencyCode(onboardingData.currency.ifBlank { "USD" })
+    val dailyBudgetMinor = parseMinor(onboardingData.dailyBudget, currency) ?: 0L
+    val dailyBudget = Money.of(dailyBudgetMinor, currency)
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -68,9 +69,9 @@ fun MainApp(
         ) {
             when (screen) {
                 MainScreen.TANK -> TankScreen(
-                    dailyBudget = Money.of(10000, currency),
-                    remaining = Money.of(4250, currency),
-                    netStatus = Money.of(120000, currency),
+                    dailyBudget = dailyBudget,
+                    remaining = dailyBudget,
+                    netStatus = Money.of(0L, currency),
                     onShowMonthlySummary = { showMonthlySummary = true },
                 )
                 MainScreen.EXPENSE -> AddExpenseScreen(
@@ -354,7 +355,7 @@ private fun SavingsTrackerScreen(
         )
         Button(
             onClick = {
-                val date = Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
+                val date = kotlin.time.Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
                 entries.add(SavingsEntryDraft(amount = amount, note = note, date = date))
                 amount = ""
                 note = ""
@@ -404,4 +405,10 @@ private fun MonthlySummaryDialog(
         title = { Text("Monthly Summary") },
         text = { Text("You saved ${savedAmount.format()} this month.") },
     )
+}
+
+private fun parseMinor(amount: String, currency: String): Long? {
+    val cleaned = amount.trim().replace(",", ".")
+    val value = cleaned.toDoubleOrNull() ?: return null
+    return Money.fromDecimal(value, currency).minor
 }

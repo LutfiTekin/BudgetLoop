@@ -45,6 +45,7 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.kotlinx.datetime)
+            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.room.runtime)
             implementation(libs.sqlite.bundled)
@@ -86,4 +87,7 @@ android {
 dependencies {
     debugImplementation(compose.uiTooling)
     add("kspCommonMainMetadata", libs.room.compiler)
+    add("kspAndroid", libs.room.compiler)
+    add("kspIosArm64", libs.room.compiler)
+    add("kspIosSimulatorArm64", libs.room.compiler)
 }

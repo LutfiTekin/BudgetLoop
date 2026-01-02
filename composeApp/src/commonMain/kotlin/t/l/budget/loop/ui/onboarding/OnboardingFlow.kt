@@ -56,6 +56,7 @@ private enum class OnboardingStep {
 @Composable
 fun OnboardingFlow(
     onFinished: (OnboardingData) -> Unit,
+    errorMessage: String? = null,
 ) {
     var step by remember { mutableStateOf(OnboardingStep.WELCOME) }
     var currency by remember { mutableStateOf("") }
@@ -69,6 +70,12 @@ fun OnboardingFlow(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        if (!errorMessage.isNullOrBlank()) {
+            Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         when (step) {
             OnboardingStep.WELCOME -> WelcomeStep(
                 onStart = { step = OnboardingStep.CURRENCY },
