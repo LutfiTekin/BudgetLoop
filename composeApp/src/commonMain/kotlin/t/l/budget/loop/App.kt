@@ -35,8 +35,6 @@ fun App() {
         val repository = remember(database) {
             OnboardingRepository(
                 settingsDao = database.settingsDao(),
-                bankAccountDao = database.bankAccountDao(),
-                creditCardDao = database.creditCardDao(),
             )
         }
         var appState by remember { mutableStateOf<AppState>(AppState.Loading) }

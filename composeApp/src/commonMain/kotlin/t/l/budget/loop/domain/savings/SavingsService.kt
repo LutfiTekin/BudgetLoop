@@ -28,8 +28,7 @@ class SavingsService(
     suspend fun addMonthEndEntry(
         amount: Money,
         date: LocalDate,
-    ): Long? {
-        if (amount.minor <= 0L) return null
+    ): Long {
         val entry = SavingsEntryEntity(
             amountMinor = amount.minor,
             date = date,

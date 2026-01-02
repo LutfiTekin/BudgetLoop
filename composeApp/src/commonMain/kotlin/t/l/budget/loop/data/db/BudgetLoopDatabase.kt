@@ -10,10 +10,7 @@ import androidx.room.TypeConverters
 @Database(
     entities = [
         SettingsEntity::class,
-        BankAccountEntity::class,
-        CreditCardEntity::class,
         TransactionEntity::class,
-        BalanceAdjustmentEntity::class,
         FxRateEntity::class,
         DailyBudgetStateEntity::class,
         SavingsEntryEntity::class,
@@ -24,10 +21,7 @@ import androidx.room.TypeConverters
 @TypeConverters(RoomConverters::class)
 abstract class BudgetLoopDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao
-    abstract fun bankAccountDao(): BankAccountDao
-    abstract fun creditCardDao(): CreditCardDao
     abstract fun transactionDao(): TransactionDao
-    abstract fun balanceAdjustmentDao(): BalanceAdjustmentDao
     abstract fun fxRateDao(): FxRateDao
     abstract fun dailyBudgetStateDao(): DailyBudgetStateDao
     abstract fun savingsEntryDao(): SavingsEntryDao

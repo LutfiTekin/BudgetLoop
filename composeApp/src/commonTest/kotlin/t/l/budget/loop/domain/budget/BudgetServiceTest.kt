@@ -3,6 +3,7 @@ package t.l.budget.loop.domain.budget
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import t.l.budget.loop.data.db.DailyBudgetStateDao
@@ -113,8 +114,6 @@ private class FakeTransactionDao(
     private val sumDefault: Long,
 ) : TransactionDao {
     override suspend fun getById(id: Long): TransactionEntity? = null
-
-    override suspend fun listByCard(cardId: Long): List<TransactionEntity> = emptyList()
 
     override suspend fun listBetween(start: Instant, endExclusive: Instant): List<TransactionEntity> = emptyList()
 

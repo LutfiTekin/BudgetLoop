@@ -33,6 +33,8 @@ data class Money(val minor: Long, val currency: CurrencyCode) {
 
     operator fun unaryMinus(): Money = Money(-minor, currency)
 
+    fun abs(): Money = Money(kotlin.math.abs(minor), currency)
+
     fun format(withCurrency: Boolean = true): String {
         return MoneyFormatter.format(this, withCurrency)
     }

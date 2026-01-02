@@ -16,7 +16,7 @@ class BudgetEngine {
     }
 
     fun monthEndSaved(carryMinor: Long): Long {
-        return max(carryMinor, 0L)
+        return carryMinor
     }
 
     fun isLastDayOfMonth(date: LocalDate): Boolean {

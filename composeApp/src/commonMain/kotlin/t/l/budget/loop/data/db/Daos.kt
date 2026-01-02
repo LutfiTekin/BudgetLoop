@@ -19,42 +19,9 @@ interface SettingsDao {
 }
 
 @Dao
-interface BankAccountDao {
-    @Query("SELECT * FROM bank_accounts ORDER BY name")
-    suspend fun list(): List<BankAccountEntity>
-
-    @Query("SELECT * FROM bank_accounts WHERE id = :id")
-    suspend fun getById(id: Long): BankAccountEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(account: BankAccountEntity): Long
-
-    @Delete
-    suspend fun delete(account: BankAccountEntity)
-}
-
-@Dao
-interface CreditCardDao {
-    @Query("SELECT * FROM credit_cards ORDER BY name")
-    suspend fun list(): List<CreditCardEntity>
-
-    @Query("SELECT * FROM credit_cards WHERE id = :id")
-    suspend fun getById(id: Long): CreditCardEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(card: CreditCardEntity): Long
-
-    @Delete
-    suspend fun delete(card: CreditCardEntity)
-}
-
-@Dao
 interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun getById(id: Long): TransactionEntity?
-
-    @Query("SELECT * FROM transactions WHERE cardId = :cardId ORDER BY date DESC")
-    suspend fun listByCard(cardId: Long): List<TransactionEntity>
 
     @Query(
         "SELECT * FROM transactions " +
@@ -80,22 +47,6 @@ interface TransactionDao {
 
     @Delete
     suspend fun delete(transaction: TransactionEntity)
-}
-
-@Dao
-interface BalanceAdjustmentDao {
-    @Query(
-        "SELECT * FROM balance_adjustments " +
-            "WHERE accountType = :accountType AND accountId = :accountId " +
-            "ORDER BY date DESC",
-    )
-    suspend fun listForAccount(
-        accountType: AccountType,
-        accountId: Long,
-    ): List<BalanceAdjustmentEntity>
-
-    @Insert
-    suspend fun insert(adjustment: BalanceAdjustmentEntity): Long
 }
 
 @Dao

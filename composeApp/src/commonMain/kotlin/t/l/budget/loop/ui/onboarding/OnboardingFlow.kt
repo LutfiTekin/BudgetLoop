@@ -15,7 +15,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -24,32 +23,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
-data class CardDraft(
-    val name: String,
-    val limit: String,
-    val debt: String,
-    val currency: String,
-)
-
-data class BankDraft(
-    val name: String,
-    val balance: String,
-    val currency: String,
-)
-
 data class OnboardingData(
     val currency: String,
     val dailyBudget: String,
-    val cards: List<CardDraft>,
-    val banks: List<BankDraft>,
 )
 
 private enum class OnboardingStep {
     WELCOME,
     CURRENCY,
     DAILY_BUDGET,
-    CARDS,
-    BANKS,
     DONE,
 }
 
@@ -61,8 +43,6 @@ fun OnboardingFlow(
     var step by remember { mutableStateOf(OnboardingStep.WELCOME) }
     var currency by remember { mutableStateOf("") }
     var dailyBudget by remember { mutableStateOf("") }
-    val cards = remember { mutableStateListOf<CardDraft>() }
-    val banks = remember { mutableStateListOf<BankDraft>() }
 
     Column(
         modifier = Modifier
@@ -89,32 +69,16 @@ fun OnboardingFlow(
                 dailyBudget = dailyBudget,
                 onBudgetChange = { dailyBudget = it },
                 onBack = { step = OnboardingStep.CURRENCY },
-                onNext = { step = OnboardingStep.CARDS },
-            )
-            OnboardingStep.CARDS -> CardsStep(
-                defaultCurrency = currency,
-                cards = cards,
-                onBack = { step = OnboardingStep.DAILY_BUDGET },
-                onNext = { step = OnboardingStep.BANKS },
-            )
-            OnboardingStep.BANKS -> BanksStep(
-                defaultCurrency = currency,
-                banks = banks,
-                onBack = { step = OnboardingStep.CARDS },
                 onNext = { step = OnboardingStep.DONE },
             )
             OnboardingStep.DONE -> DoneStep(
                 currency = currency,
                 dailyBudget = dailyBudget,
-                cardCount = cards.size,
-                bankCount = banks.size,
                 onFinish = {
                     onFinished(
                         OnboardingData(
                             currency = currency,
                             dailyBudget = dailyBudget,
-                            cards = cards.toList(),
-                            banks = banks.toList(),
                         ),
                     )
                 },
@@ -179,135 +143,14 @@ private fun DailyBudgetStep(
 }
 
 @Composable
-private fun CardsStep(
-    defaultCurrency: String,
-    cards: MutableList<CardDraft>,
-    onBack: () -> Unit,
-    onNext: () -> Unit,
-) {
-    var name by remember { mutableStateOf("") }
-    var limit by remember { mutableStateOf("") }
-    var debt by remember { mutableStateOf("") }
-    var currency by remember(defaultCurrency) { mutableStateOf(defaultCurrency) }
-
-    Text("Add Credit Cards", style = MaterialTheme.typography.titleLarge)
-    TextField(
-        value = name,
-        onValueChange = { name = it },
-        label = { Text("Card name") },
-        singleLine = true,
-    )
-    TextField(
-        value = limit,
-        onValueChange = { limit = it },
-        label = { Text("Limit") },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        singleLine = true,
-    )
-    TextField(
-        value = debt,
-        onValueChange = { debt = it },
-        label = { Text("Current debt") },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        singleLine = true,
-    )
-    TextField(
-        value = currency,
-        onValueChange = { currency = it.uppercase() },
-        label = { Text("Currency") },
-        singleLine = true,
-    )
-    Button(
-        onClick = {
-            cards.add(CardDraft(name, limit, debt, currency))
-            name = ""
-            limit = ""
-            debt = ""
-            currency = defaultCurrency
-        },
-        enabled = name.isNotBlank() && limit.isNotBlank() && debt.isNotBlank() && currency.length == 3,
-    ) {
-        Text("Add card")
-    }
-
-    if (cards.isNotEmpty()) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Cards added:", style = MaterialTheme.typography.titleSmall)
-        cards.forEach { card ->
-            Text("- ${card.name} (${card.currency})")
-        }
-    }
-
-    StepActions(onBack = onBack, onNext = onNext, nextEnabled = true)
-}
-
-@Composable
-private fun BanksStep(
-    defaultCurrency: String,
-    banks: MutableList<BankDraft>,
-    onBack: () -> Unit,
-    onNext: () -> Unit,
-) {
-    var name by remember { mutableStateOf("") }
-    var balance by remember { mutableStateOf("") }
-    var currency by remember(defaultCurrency) { mutableStateOf(defaultCurrency) }
-
-    Text("Add Bank Accounts (Optional)", style = MaterialTheme.typography.titleLarge)
-    TextField(
-        value = name,
-        onValueChange = { name = it },
-        label = { Text("Bank name") },
-        singleLine = true,
-    )
-    TextField(
-        value = balance,
-        onValueChange = { balance = it },
-        label = { Text("Balance") },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        singleLine = true,
-    )
-    TextField(
-        value = currency,
-        onValueChange = { currency = it.uppercase() },
-        label = { Text("Currency") },
-        singleLine = true,
-    )
-    Button(
-        onClick = {
-            banks.add(BankDraft(name, balance, currency))
-            name = ""
-            balance = ""
-            currency = defaultCurrency
-        },
-        enabled = name.isNotBlank() && balance.isNotBlank() && currency.length == 3,
-    ) {
-        Text("Add bank")
-    }
-
-    if (banks.isNotEmpty()) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Banks added:", style = MaterialTheme.typography.titleSmall)
-        banks.forEach { bank ->
-            Text("- ${bank.name} (${bank.currency})")
-        }
-    }
-
-    StepActions(onBack = onBack, onNext = onNext, nextEnabled = true)
-}
-
-@Composable
 private fun DoneStep(
     currency: String,
     dailyBudget: String,
-    cardCount: Int,
-    bankCount: Int,
     onFinish: () -> Unit,
 ) {
     Text("Ready to Loop", style = MaterialTheme.typography.titleLarge)
     Text("Currency: $currency")
     Text("Daily budget: $dailyBudget")
-    Text("Cards: $cardCount")
-    Text("Banks: $bankCount")
     Spacer(modifier = Modifier.height(8.dp))
     Button(onClick = onFinish) {
         Text("Finish")

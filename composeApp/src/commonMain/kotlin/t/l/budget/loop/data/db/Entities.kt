@@ -1,7 +1,6 @@
 package t.l.budget.loop.data.db
 
 import androidx.room.Entity
-import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.datetime.Instant
@@ -16,36 +15,10 @@ data class SettingsEntity(
     val reportTimeMinutes: Int,
 )
 
-@Entity(tableName = "bank_accounts")
-data class BankAccountEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
-    val name: String,
-    val balanceMinor: Long,
-    val currency: String,
-)
-
-@Entity(tableName = "credit_cards")
-data class CreditCardEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
-    val name: String,
-    val limitMinor: Long,
-    val debtMinor: Long,
-    val currency: String,
-)
-
 @Entity(
     tableName = "transactions",
     indices = [
-        Index(value = ["cardId"]),
         Index(value = ["date"]),
-    ],
-    foreignKeys = [
-        ForeignKey(
-            entity = CreditCardEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["cardId"],
-            onDelete = ForeignKey.CASCADE,
-        ),
     ],
 )
 data class TransactionEntity(
@@ -53,28 +26,9 @@ data class TransactionEntity(
     val amountMinor: Long,
     val amountDefaultMinor: Long,
     val currency: String,
-    val cardId: Long,
     val date: Instant,
     val note: String?,
     val category: String?,
-)
-
-@Entity(
-    tableName = "balance_adjustments",
-    indices = [
-        Index(value = ["accountType"]),
-        Index(value = ["accountId"]),
-        Index(value = ["date"]),
-    ],
-)
-data class BalanceAdjustmentEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
-    val accountType: AccountType,
-    val accountId: Long,
-    val oldBalanceMinor: Long,
-    val newBalanceMinor: Long,
-    val date: Instant,
-    val note: String?,
 )
 
 @Entity(

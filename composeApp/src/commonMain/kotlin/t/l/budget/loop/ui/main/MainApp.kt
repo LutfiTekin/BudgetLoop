@@ -34,13 +34,11 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.todayIn
 import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
-import t.l.budget.loop.ui.onboarding.CardDraft
 import t.l.budget.loop.ui.onboarding.OnboardingData
 
 private enum class MainScreen {
     TANK,
     EXPENSE,
-    CORRECTION,
     SAVINGS,
 }
 
@@ -71,14 +69,11 @@ fun MainApp(
                 MainScreen.TANK -> TankScreen(
                     dailyBudget = dailyBudget,
                     remaining = dailyBudget,
-                    netStatus = Money.of(0L, currency),
                     onShowMonthlySummary = { showMonthlySummary = true },
                 )
                 MainScreen.EXPENSE -> AddExpenseScreen(
                     defaultCurrency = currency,
-                    cards = onboardingData.cards,
                 )
-                MainScreen.CORRECTION -> CorrectionScreen(defaultCurrency = currency)
                 MainScreen.SAVINGS -> SavingsTrackerScreen(
                     defaultCurrency = currency,
                     entries = savingsEntries,
@@ -120,11 +115,6 @@ private fun MainNav(
             onClick = { onSelect(MainScreen.EXPENSE) },
         )
         NavButton(
-            label = "Correct",
-            selected = current == MainScreen.CORRECTION,
-            onClick = { onSelect(MainScreen.CORRECTION) },
-        )
-        NavButton(
             label = "Savings",
             selected = current == MainScreen.SAVINGS,
             onClick = { onSelect(MainScreen.SAVINGS) },
@@ -153,7 +143,6 @@ private fun RowScope.NavButton(
 private fun TankScreen(
     dailyBudget: Money,
     remaining: Money,
-    netStatus: Money,
     onShowMonthlySummary: () -> Unit,
 ) {
     val progress = if (dailyBudget.minor <= 0L) {
@@ -189,9 +178,6 @@ private fun TankScreen(
             Text("Daily Remaining", style = MaterialTheme.typography.titleSmall)
             Text(remaining.format(), style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(12.dp))
-            Text("Net Status", style = MaterialTheme.typography.titleSmall)
-            Text(netStatus.format(), style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(12.dp))
             OutlinedButton(onClick = onShowMonthlySummary) {
                 Text("Monthly summary")
             }
@@ -202,10 +188,8 @@ private fun TankScreen(
 @Composable
 private fun AddExpenseScreen(
     defaultCurrency: String,
-    cards: List<CardDraft>,
 ) {
     var amount by remember { mutableStateOf("") }
-    var cardName by remember { mutableStateOf(cards.firstOrNull()?.name ?: "") }
     var category by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
 
@@ -221,12 +205,6 @@ private fun AddExpenseScreen(
             onValueChange = { amount = it },
             label = { Text("Amount ($defaultCurrency)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-        )
-        TextField(
-            value = cardName,
-            onValueChange = { cardName = it },
-            label = { Text("Card") },
             singleLine = true,
         )
         TextField(
@@ -247,80 +225,9 @@ private fun AddExpenseScreen(
                 category = ""
                 note = ""
             },
-            enabled = amount.isNotBlank() && cardName.isNotBlank(),
+            enabled = amount.isNotBlank(),
         ) {
             Text("Save expense")
-        }
-        if (cards.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Cards on file:", style = MaterialTheme.typography.titleSmall)
-            cards.forEach { card -> Text("- ${card.name} (${card.currency})") }
-        }
-    }
-}
-
-@Composable
-private fun CorrectionScreen(
-    defaultCurrency: String,
-) {
-    var bankName by remember { mutableStateOf("") }
-    var bankBalance by remember { mutableStateOf("") }
-    var cardName by remember { mutableStateOf("") }
-    var cardDebt by remember { mutableStateOf("") }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Correction Mode", style = MaterialTheme.typography.titleLarge)
-        Text("Adjust bank balance")
-        TextField(
-            value = bankName,
-            onValueChange = { bankName = it },
-            label = { Text("Bank name") },
-            singleLine = true,
-        )
-        TextField(
-            value = bankBalance,
-            onValueChange = { bankBalance = it },
-            label = { Text("New balance ($defaultCurrency)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-        )
-        Button(
-            onClick = {
-                bankName = ""
-                bankBalance = ""
-            },
-            enabled = bankName.isNotBlank() && bankBalance.isNotBlank(),
-        ) {
-            Text("Apply bank adjustment")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Adjust card debt")
-        TextField(
-            value = cardName,
-            onValueChange = { cardName = it },
-            label = { Text("Card name") },
-            singleLine = true,
-        )
-        TextField(
-            value = cardDebt,
-            onValueChange = { cardDebt = it },
-            label = { Text("New debt ($defaultCurrency)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-        )
-        Button(
-            onClick = {
-                cardName = ""
-                cardDebt = ""
-            },
-            enabled = cardName.isNotBlank() && cardDebt.isNotBlank(),
-        ) {
-            Text("Apply card adjustment")
         }
     }
 }
@@ -403,7 +310,13 @@ private fun MonthlySummaryDialog(
             }
         },
         title = { Text("Monthly Summary") },
-        text = { Text("You saved ${savedAmount.format()} this month.") },
+        text = {
+            if (savedAmount.minor >= 0) {
+                Text("You saved ${savedAmount.format()} this month.")
+            } else {
+                Text("You overspent by ${savedAmount.abs().format()} this month.")
+            }
+        },
     )
 }
 

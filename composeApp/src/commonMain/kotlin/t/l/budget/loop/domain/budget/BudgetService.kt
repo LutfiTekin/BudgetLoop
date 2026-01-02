@@ -62,16 +62,14 @@ class BudgetService(
         }
 
         val savedMinor = engine.monthEndSaved(state.remainingMinor)
-        if (savedMinor > 0L) {
-            savingsEntryDao.insert(
-                SavingsEntryEntity(
-                    amountMinor = savedMinor,
-                    date = date,
-                    source = SavingsSource.MONTH_END,
-                    note = null,
-                ),
-            )
-        }
+        savingsEntryDao.insert(
+            SavingsEntryEntity(
+                amountMinor = savedMinor,
+                date = date,
+                source = SavingsSource.MONTH_END,
+                note = null,
+            ),
+        )
         dailyBudgetStateDao.upsert(state.copy(monthlySavedMinor = savedMinor))
         return MonthEndResult(date = date, savedMinor = savedMinor)
     }

@@ -26,16 +26,6 @@ class RoomConverters {
     }
 
     @TypeConverter
-    fun accountTypeToString(value: AccountType?): String? {
-        return value?.name
-    }
-
-    @TypeConverter
-    fun stringToAccountType(value: String?): AccountType? {
-        return value?.let { AccountType.valueOf(it) }
-    }
-
-    @TypeConverter
     fun savingsSourceToString(value: SavingsSource?): String? {
         return value?.name
     }
