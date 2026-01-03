@@ -45,7 +45,7 @@ import t.l.budget.loop.domain.transactions.TransactionService
 import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
 import t.l.budget.loop.ui.onboarding.OnboardingData
-import kotlin.time.Clock.*
+import kotlin.time.Clock
 
 private enum class MainScreen {
     TANK,
@@ -80,7 +80,7 @@ fun MainApp(
     val timeZone = TimeZone.currentSystemDefault()
 
     suspend fun loadTransactions() {
-        val today = System.todayIn(timeZone)
+        val today = Clock.System.todayIn(timeZone)
         val start = today.atStartOfDayIn(timeZone)
         val endExclusive = today.plus(DatePeriod(days = 1)).atStartOfDayIn(timeZone)
         spentTodayMinor = transactionDao.sumDefaultBetween(start, endExclusive)
@@ -119,7 +119,7 @@ fun MainApp(
                         transactionService.addExpense(
                             amount = amount,
                             amountDefault = amount,
-                            date = System.now(),
+                            date = Clock.System.now(),
                             note = note,
                             category = DefaultExpenseCategory,
                         )
@@ -378,7 +378,7 @@ private fun SavingsTrackerScreen(
         )
         Button(
             onClick = {
-                val date = System.todayIn(TimeZone.currentSystemDefault()).toString()
+                val date = Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
                 entries.add(SavingsEntryDraft(amount = amount, note = note, date = date))
                 amount = ""
                 note = ""
