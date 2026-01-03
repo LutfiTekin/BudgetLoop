@@ -48,8 +48,7 @@ fun App() {
 
         Surface(
             modifier = Modifier
-                .fillMaxSize()
-                .safeContentPadding(),
+                .fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
         ) {
             when (val state = appState) {

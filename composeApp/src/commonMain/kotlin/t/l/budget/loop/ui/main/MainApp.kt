@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -38,14 +39,22 @@ import t.l.budget.loop.ui.onboarding.OnboardingData
 
 private enum class MainScreen {
     TANK,
-    EXPENSE,
     SAVINGS,
 }
+
+private const val DefaultExpenseCategory = "Food"
 
 data class SavingsEntryDraft(
     val amount: String,
     val note: String,
     val date: String,
+)
+
+data class ExpenseDraft(
+    val amountMinor: Long,
+    val note: String?,
+    val date: String,
+    val category: String,
 )
 
 @Composable
@@ -54,87 +63,111 @@ fun MainApp(
 ) {
     var screen by remember { mutableStateOf(MainScreen.TANK) }
     var showMonthlySummary by remember { mutableStateOf(false) }
+    var showAddExpenseDialog by remember { mutableStateOf(false) }
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
+    val expenses = remember { mutableStateListOf<ExpenseDraft>() }
     val currency = normalizeCurrencyCode(onboardingData.currency.ifBlank { "USD" })
     val dailyBudgetMinor = parseMinor(onboardingData.dailyBudget, currency) ?: 0L
     val dailyBudget = Money.of(dailyBudgetMinor, currency)
+    val spentMinor = expenses.sumOf { it.amountMinor }
+    val remaining = Money.of(dailyBudget.minor - spentMinor, currency)
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        ) {
-            when (screen) {
-                MainScreen.TANK -> TankScreen(
-                    dailyBudget = dailyBudget,
-                    remaining = dailyBudget,
-                    onShowMonthlySummary = { showMonthlySummary = true },
-                )
-                MainScreen.EXPENSE -> AddExpenseScreen(
-                    defaultCurrency = currency,
-                )
-                MainScreen.SAVINGS -> SavingsTrackerScreen(
-                    defaultCurrency = currency,
-                    entries = savingsEntries,
-                )
-            }
-            if (showMonthlySummary) {
-                MonthlySummaryDialog(
-                    savedAmount = Money.of(7800, currency),
-                    onDismiss = { showMonthlySummary = false },
-                )
-            }
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (screen) {
+            MainScreen.TANK -> TankScreen(
+                dailyBudget = dailyBudget,
+                remaining = remaining,
+                transactions = expenses,
+                onShowMonthlySummary = { showMonthlySummary = true },
+            )
+            MainScreen.SAVINGS -> SavingsTrackerScreen(
+                defaultCurrency = currency,
+                entries = savingsEntries,
+            )
         }
-        MainNav(
+        if (showMonthlySummary) {
+            MonthlySummaryDialog(
+                savedAmount = Money.of(7800, currency),
+                onDismiss = { showMonthlySummary = false },
+            )
+        }
+        if (showAddExpenseDialog) {
+            AddExpenseDialog(
+                defaultCurrency = currency,
+                onSave = { amountMinor, note ->
+                    val date = kotlin.time.Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
+                    expenses.add(
+                        ExpenseDraft(
+                            amountMinor = amountMinor,
+                            note = note,
+                            date = date,
+                            category = DefaultExpenseCategory,
+                        ),
+                    )
+                },
+                onDismiss = { showAddExpenseDialog = false },
+            )
+        }
+        FabMenu(
             current = screen,
-            onSelect = { screen = it },
+            onNavigate = { target ->
+                screen = target
+                if (target != MainScreen.TANK) {
+                    showMonthlySummary = false
+                }
+            },
+            onAddExpense = {
+                showMonthlySummary = false
+                showAddExpenseDialog = true
+            },
+            modifier = Modifier.align(Alignment.BottomEnd),
         )
     }
 }
 
 @Composable
-private fun MainNav(
+private fun FabMenu(
     current: MainScreen,
-    onSelect: (MainScreen) -> Unit,
+    onNavigate: (MainScreen) -> Unit,
+    onAddExpense: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        NavButton(
-            label = "Tank",
-            selected = current == MainScreen.TANK,
-            onClick = { onSelect(MainScreen.TANK) },
-        )
-        NavButton(
-            label = "Expense",
-            selected = current == MainScreen.EXPENSE,
-            onClick = { onSelect(MainScreen.EXPENSE) },
-        )
-        NavButton(
-            label = "Savings",
-            selected = current == MainScreen.SAVINGS,
-            onClick = { onSelect(MainScreen.SAVINGS) },
-        )
-    }
-}
+    var expanded by remember { mutableStateOf(false) }
 
-@Composable
-private fun RowScope.NavButton(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    if (selected) {
-        Button(onClick = onClick, modifier = Modifier.weight(1f)) {
-            Text(label)
+    Column(
+        modifier = modifier.padding(20.dp),
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (expanded) {
+            ExtendedFloatingActionButton(
+                onClick = {
+                    expanded = false
+                    onAddExpense()
+                },
+                content = { Text("Add expense") },
+            )
+            if (current != MainScreen.SAVINGS) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        expanded = false
+                        onNavigate(MainScreen.SAVINGS)
+                    },
+                    content = { Text("Savings") },
+                )
+            }
+            if (current != MainScreen.TANK) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        expanded = false
+                        onNavigate(MainScreen.TANK)
+                    },
+                    content = { Text("Tank") },
+                )
+            }
         }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) {
-            Text(label)
+        FloatingActionButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "x" else "+")
         }
     }
 }
@@ -143,6 +176,7 @@ private fun RowScope.NavButton(
 private fun TankScreen(
     dailyBudget: Money,
     remaining: Money,
+    transactions: List<ExpenseDraft>,
     onShowMonthlySummary: () -> Unit,
 ) {
     val progress = if (dailyBudget.minor <= 0L) {
@@ -182,54 +216,117 @@ private fun TankScreen(
                 Text("Monthly summary")
             }
         }
+        TransactionHistory(
+            transactions = transactions,
+            currency = remaining.currency,
+            modifier = Modifier.align(Alignment.Center),
+        )
     }
 }
 
 @Composable
-private fun AddExpenseScreen(
-    defaultCurrency: String,
+private fun TransactionHistory(
+    transactions: List<ExpenseDraft>,
+    currency: String,
+    modifier: Modifier = Modifier,
 ) {
-    var amount by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier
+            .fillMaxWidth(0.85f)
+            .background(
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                MaterialTheme.shapes.medium,
+            )
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Add Expense", style = MaterialTheme.typography.titleLarge)
-        TextField(
-            value = amount,
-            onValueChange = { amount = it },
-            label = { Text("Amount ($defaultCurrency)") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-        )
-        TextField(
-            value = category,
-            onValueChange = { category = it },
-            label = { Text("Category (optional)") },
-            singleLine = true,
-        )
-        TextField(
-            value = note,
-            onValueChange = { note = it },
-            label = { Text("Note (optional)") },
-            singleLine = true,
-        )
-        Button(
-            onClick = {
-                amount = ""
-                category = ""
-                note = ""
-            },
-            enabled = amount.isNotBlank(),
-        ) {
-            Text("Save expense")
+        Text("Transaction history", style = MaterialTheme.typography.titleSmall)
+        if (transactions.isEmpty()) {
+            Text("No transactions yet.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            transactions.asReversed().forEach { transaction ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        transaction.note?.ifBlank { "No note" } ?: "No note",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        Money.of(transaction.amountMinor, currency).format(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun AddExpenseDialog(
+    defaultCurrency: String,
+    onSave: (Long, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var amount by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    val amountMinor = parseMinor(amount, defaultCurrency)
+    val canSave = amountMinor != null
+    val showAmountError = amount.isNotBlank() && amountMinor == null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(
+                onClick = {
+                    val minor = amountMinor ?: return@Button
+                    val cleanedNote = note.trim().ifBlank { null }
+                    onSave(minor, cleanedNote)
+                    amount = ""
+                    note = ""
+                    onDismiss()
+                },
+                enabled = canSave,
+            ) {
+                Text("Save expense")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        title = { Text("Add Expense") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Amount ($defaultCurrency)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+                if (showAmountError) {
+                    Text(
+                        "Enter a valid amount.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                TextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Note (optional)") },
+                    singleLine = true,
+                )
+            }
+        },
+    )
 }
 
 @Composable
