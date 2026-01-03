@@ -12,7 +12,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import org.jetbrains.compose.ui.tooling.preview.Preview
@@ -25,11 +24,12 @@ import t.l.budget.loop.domain.onboarding.OnboardingRepository
 import t.l.budget.loop.domain.onboarding.OnboardingSaveResult
 import t.l.budget.loop.platform.createDatabase
 import t.l.budget.loop.platform.rememberPlatformContext
+import t.l.budget.loop.ui.theme.AppColorScheme
 
 @Composable
 @Preview
 fun App() {
-    MaterialTheme {
+    MaterialTheme(colorScheme = AppColorScheme) {
         val platformContext = rememberPlatformContext()
         val database = remember(platformContext) { createDatabase(platformContext) }
         val repository = remember(database) {

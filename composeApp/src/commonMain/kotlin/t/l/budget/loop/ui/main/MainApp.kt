@@ -30,21 +30,25 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
-import kotlinx.datetime.todayIn
+import kotlinx.datetime.toLocalDateTime
 import t.l.budget.loop.data.db.TransactionDao
 import t.l.budget.loop.data.db.TransactionEntity
 import t.l.budget.loop.domain.transactions.TransactionService
 import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
 import t.l.budget.loop.ui.onboarding.OnboardingData
+import t.l.budget.loop.ui.theme.GrayLavender
+import t.l.budget.loop.ui.theme.MutedPurple
+import t.l.budget.loop.ui.theme.SoftViolet
 import kotlin.time.Clock
 
 private enum class MainScreen {
@@ -80,7 +84,7 @@ fun MainApp(
     val timeZone = TimeZone.currentSystemDefault()
 
     suspend fun loadTransactions() {
-        val today = Clock.System.todayIn(timeZone)
+        val today = currentLocalDate(timeZone)
         val start = today.atStartOfDayIn(timeZone)
         val endExclusive = today.plus(DatePeriod(days = 1)).atStartOfDayIn(timeZone)
         spentTodayMinor = transactionDao.sumDefaultBetween(start, endExclusive)
@@ -116,10 +120,11 @@ fun MainApp(
                 onSave = { amountMinor, note ->
                     scope.launch {
                         val amount = Money.of(amountMinor, currency)
+                        val nowInstant = nowInstant()
                         transactionService.addExpense(
                             amount = amount,
                             amountDefault = amount,
-                            date = Clock.System.now(),
+                            date = nowInstant,
                             note = note,
                             category = DefaultExpenseCategory,
                         )
@@ -206,11 +211,11 @@ private fun TankScreen(
         (remaining.minor.toFloat() / dailyBudget.minor.toFloat()).coerceIn(0f, 1f)
     }
     val fillColor = when {
-        progress > 0.6f -> Color(0xFF2E8B57)
-        progress > 0.3f -> Color(0xFFF0C75E)
-        else -> Color(0xFFCC4E4E)
+        progress > 0.6f -> MutedPurple
+        progress > 0.3f -> SoftViolet
+        else -> GrayLavender
     }
-    val baseColor = MaterialTheme.colorScheme.surfaceVariant
+    val baseColor = MaterialTheme.colorScheme.background
 
     Box(
         modifier = Modifier
@@ -378,7 +383,7 @@ private fun SavingsTrackerScreen(
         )
         Button(
             onClick = {
-                val date = Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
+                val date = currentLocalDate(TimeZone.currentSystemDefault()).toString()
                 entries.add(SavingsEntryDraft(amount = amount, note = note, date = date))
                 amount = ""
                 note = ""
@@ -434,6 +439,15 @@ private fun MonthlySummaryDialog(
             }
         },
     )
+}
+
+private fun nowInstant(): Instant {
+    val now = Clock.System.now()
+    return Instant.fromEpochMilliseconds(now.toEpochMilliseconds())
+}
+
+private fun currentLocalDate(timeZone: TimeZone): LocalDate {
+    return nowInstant().toLocalDateTime(timeZone).date
 }
 
 private fun parseMinor(amount: String, currency: String): Long? {
