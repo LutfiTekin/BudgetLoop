@@ -115,6 +115,8 @@ private class FakeTransactionDao(
 ) : TransactionDao {
     override suspend fun getById(id: Long): TransactionEntity? = null
 
+    override suspend fun listAll(): List<TransactionEntity> = emptyList()
+
     override suspend fun listBetween(start: Instant, endExclusive: Instant): List<TransactionEntity> = emptyList()
 
     override suspend fun sumDefaultBetween(start: Instant, endExclusive: Instant): Long = sumDefault

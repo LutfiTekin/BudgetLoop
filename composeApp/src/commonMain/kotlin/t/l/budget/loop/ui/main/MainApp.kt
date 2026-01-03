@@ -21,21 +21,31 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
 import kotlinx.datetime.todayIn
+import t.l.budget.loop.data.db.TransactionDao
+import t.l.budget.loop.data.db.TransactionEntity
+import t.l.budget.loop.domain.transactions.TransactionService
 import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
 import t.l.budget.loop.ui.onboarding.OnboardingData
+import kotlin.time.Clock.*
 
 private enum class MainScreen {
     TANK,
@@ -50,34 +60,43 @@ data class SavingsEntryDraft(
     val date: String,
 )
 
-data class ExpenseDraft(
-    val amountMinor: Long,
-    val note: String?,
-    val date: String,
-    val category: String,
-)
-
 @Composable
 fun MainApp(
     onboardingData: OnboardingData,
+    transactionDao: TransactionDao,
 ) {
     var screen by remember { mutableStateOf(MainScreen.TANK) }
     var showMonthlySummary by remember { mutableStateOf(false) }
     var showAddExpenseDialog by remember { mutableStateOf(false) }
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
-    val expenses = remember { mutableStateListOf<ExpenseDraft>() }
+    val scope = rememberCoroutineScope()
+    val transactionService = remember(transactionDao) { TransactionService(transactionDao) }
+    var transactions by remember { mutableStateOf<List<TransactionEntity>>(emptyList()) }
+    var spentTodayMinor by remember { mutableStateOf(0L) }
     val currency = normalizeCurrencyCode(onboardingData.currency.ifBlank { "USD" })
     val dailyBudgetMinor = parseMinor(onboardingData.dailyBudget, currency) ?: 0L
     val dailyBudget = Money.of(dailyBudgetMinor, currency)
-    val spentMinor = expenses.sumOf { it.amountMinor }
-    val remaining = Money.of(dailyBudget.minor - spentMinor, currency)
+    val remaining = Money.of(dailyBudget.minor - spentTodayMinor, currency)
+    val timeZone = TimeZone.currentSystemDefault()
+
+    suspend fun loadTransactions() {
+        val today = System.todayIn(timeZone)
+        val start = today.atStartOfDayIn(timeZone)
+        val endExclusive = today.plus(DatePeriod(days = 1)).atStartOfDayIn(timeZone)
+        spentTodayMinor = transactionDao.sumDefaultBetween(start, endExclusive)
+        transactions = transactionDao.listAll()
+    }
+
+    LaunchedEffect(transactionDao) {
+        loadTransactions()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (screen) {
             MainScreen.TANK -> TankScreen(
                 dailyBudget = dailyBudget,
                 remaining = remaining,
-                transactions = expenses,
+                transactions = transactions,
                 onShowMonthlySummary = { showMonthlySummary = true },
             )
             MainScreen.SAVINGS -> SavingsTrackerScreen(
@@ -95,15 +114,17 @@ fun MainApp(
             AddExpenseDialog(
                 defaultCurrency = currency,
                 onSave = { amountMinor, note ->
-                    val date = kotlin.time.Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
-                    expenses.add(
-                        ExpenseDraft(
-                            amountMinor = amountMinor,
+                    scope.launch {
+                        val amount = Money.of(amountMinor, currency)
+                        transactionService.addExpense(
+                            amount = amount,
+                            amountDefault = amount,
+                            date = System.now(),
                             note = note,
-                            date = date,
                             category = DefaultExpenseCategory,
-                        ),
-                    )
+                        )
+                        loadTransactions()
+                    }
                 },
                 onDismiss = { showAddExpenseDialog = false },
             )
@@ -176,7 +197,7 @@ private fun FabMenu(
 private fun TankScreen(
     dailyBudget: Money,
     remaining: Money,
-    transactions: List<ExpenseDraft>,
+    transactions: List<TransactionEntity>,
     onShowMonthlySummary: () -> Unit,
 ) {
     val progress = if (dailyBudget.minor <= 0L) {
@@ -218,7 +239,6 @@ private fun TankScreen(
         }
         TransactionHistory(
             transactions = transactions,
-            currency = remaining.currency,
             modifier = Modifier.align(Alignment.Center),
         )
     }
@@ -226,8 +246,7 @@ private fun TankScreen(
 
 @Composable
 private fun TransactionHistory(
-    transactions: List<ExpenseDraft>,
-    currency: String,
+    transactions: List<TransactionEntity>,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -244,7 +263,7 @@ private fun TransactionHistory(
         if (transactions.isEmpty()) {
             Text("No transactions yet.", style = MaterialTheme.typography.bodySmall)
         } else {
-            transactions.asReversed().forEach { transaction ->
+            transactions.forEach { transaction ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -255,7 +274,7 @@ private fun TransactionHistory(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        Money.of(transaction.amountMinor, currency).format(),
+                        Money.of(transaction.amountMinor, transaction.currency).format(),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -359,7 +378,7 @@ private fun SavingsTrackerScreen(
         )
         Button(
             onClick = {
-                val date = kotlin.time.Clock.System.todayIn(TimeZone.currentSystemDefault()).toString()
+                val date = System.todayIn(TimeZone.currentSystemDefault()).toString()
                 entries.add(SavingsEntryDraft(amount = amount, note = note, date = date))
                 amount = ""
                 note = ""

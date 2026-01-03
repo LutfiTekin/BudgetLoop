@@ -23,6 +23,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun getById(id: Long): TransactionEntity?
 
+    @Query("SELECT * FROM transactions ORDER BY date DESC")
+    suspend fun listAll(): List<TransactionEntity>
+
     @Query(
         "SELECT * FROM transactions " +
             "WHERE date >= :start AND date < :endExclusive " +

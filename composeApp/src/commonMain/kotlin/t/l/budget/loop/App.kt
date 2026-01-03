@@ -82,7 +82,10 @@ fun App() {
                     )
                 }
                 is AppState.Ready -> {
-                    MainApp(onboardingData = state.data)
+                    MainApp(
+                        onboardingData = state.data,
+                        transactionDao = database.transactionDao(),
+                    )
                 }
             }
         }
