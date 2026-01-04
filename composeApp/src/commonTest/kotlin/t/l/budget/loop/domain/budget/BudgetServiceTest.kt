@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import t.l.budget.loop.data.db.DailyBudgetStateDao
 import t.l.budget.loop.data.db.DailyBudgetStateEntity
 import t.l.budget.loop.data.db.SavingsEntryDao
@@ -26,7 +27,7 @@ class BudgetServiceTest {
                 reportTimeMinutes = 1200,
             ),
         )
-        val transactionDao = FakeTransactionDao(sumDefault = 0L)
+        val transactionDao = FakeTransactionDao { _, _ -> 0L }
         val dailyDao = FakeDailyBudgetStateDao()
         val savingsDao = FakeSavingsEntryDao()
         val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
@@ -47,7 +48,7 @@ class BudgetServiceTest {
     }
 
     @Test
-    fun carryUsesPreviousRemainingWhenNotMonthEnd() = runTest {
+    fun carryBackfillsMissingDays() = runTest {
         val settingsDao = FakeSettingsDao(
             SettingsEntity(
                 defaultCurrency = "USD",
@@ -56,21 +57,17 @@ class BudgetServiceTest {
                 reportTimeMinutes = 1200,
             ),
         )
-        val transactionDao = FakeTransactionDao(sumDefault = 0L)
+        val transactionDao = FakeTransactionDao { start, _ ->
+            val date = start.toLocalDateTime(TimeZone.UTC).date
+            when {
+                date.dayOfMonth == 15 -> 780L
+                date.dayOfMonth in 1..14 -> 1000L
+                else -> 0L
+            }
+        }
         val dailyDao = FakeDailyBudgetStateDao()
         val savingsDao = FakeSavingsEntryDao()
         val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
-
-        val previousDate = LocalDate(2025, 3, 15)
-        dailyDao.upsert(
-            DailyBudgetStateEntity(
-                date = previousDate,
-                dailyBudgetMinor = 1000L,
-                carryMinor = 0L,
-                remainingMinor = 220L,
-                monthlySavedMinor = 0L,
-            ),
-        )
 
         val state = service.ensureDailyState(LocalDate(2025, 3, 16), TimeZone.UTC)
         assertEquals(220L, state.carryMinor)
@@ -86,7 +83,10 @@ class BudgetServiceTest {
                 reportTimeMinutes = 1200,
             ),
         )
-        val transactionDao = FakeTransactionDao(sumDefault = 200L)
+        val transactionDao = FakeTransactionDao { start, _ ->
+            val date = start.toLocalDateTime(TimeZone.UTC).date
+            if (date.dayOfMonth == 31) 200L else 1000L
+        }
         val dailyDao = FakeDailyBudgetStateDao()
         val savingsDao = FakeSavingsEntryDao()
         val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
@@ -97,6 +97,68 @@ class BudgetServiceTest {
         assertEquals(800L, savingsDao.entries.first().amountMinor)
         val savedState = dailyDao.getByDate(LocalDate(2025, 1, 31))
         assertEquals(800L, savedState?.monthlySavedMinor)
+    }
+
+    @Test
+    fun ensureDailyStateRefreshesRemaining() = runTest {
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "USD",
+                timezone = "UTC",
+                dailyBudgetMinor = 1000L,
+                reportTimeMinutes = 1200,
+            ),
+        )
+        val date = LocalDate(2025, 4, 10)
+        var spentOnDate = 120L
+        val transactionDao = FakeTransactionDao { start, _ ->
+            val currentDate = start.toLocalDateTime(TimeZone.UTC).date
+            when {
+                currentDate < date -> 1000L
+                currentDate == date -> spentOnDate
+                else -> 0L
+            }
+        }
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
+
+        val first = service.ensureDailyState(date, TimeZone.UTC)
+        assertEquals(880L, first.remainingMinor)
+
+        spentOnDate = 350L
+        val refreshed = service.ensureDailyState(date, TimeZone.UTC)
+        assertEquals(650L, refreshed.remainingMinor)
+    }
+
+    @Test
+    fun ensureDailyStatePreservesMonthEndSaved() = runTest {
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "USD",
+                timezone = "UTC",
+                dailyBudgetMinor = 1000L,
+                reportTimeMinutes = 1200,
+            ),
+        )
+        val transactionDao = FakeTransactionDao { _, _ -> 1000L }
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
+
+        val date = LocalDate(2025, 1, 31)
+        dailyDao.upsert(
+            DailyBudgetStateEntity(
+                date = date,
+                dailyBudgetMinor = 1000L,
+                carryMinor = 0L,
+                remainingMinor = 1000L,
+                monthlySavedMinor = 500L,
+            ),
+        )
+
+        val refreshed = service.ensureDailyState(date, TimeZone.UTC)
+        assertEquals(500L, refreshed.monthlySavedMinor)
     }
 }
 
@@ -111,7 +173,7 @@ private class FakeSettingsDao(
 }
 
 private class FakeTransactionDao(
-    private val sumDefault: Long,
+    private val sumDefaultProvider: (Instant, Instant) -> Long,
 ) : TransactionDao {
     override suspend fun getById(id: Long): TransactionEntity? = null
 
@@ -119,7 +181,9 @@ private class FakeTransactionDao(
 
     override suspend fun listBetween(start: Instant, endExclusive: Instant): List<TransactionEntity> = emptyList()
 
-    override suspend fun sumDefaultBetween(start: Instant, endExclusive: Instant): Long = sumDefault
+    override suspend fun sumDefaultBetween(start: Instant, endExclusive: Instant): Long {
+        return sumDefaultProvider(start, endExclusive)
+    }
 
     override suspend fun insert(transaction: TransactionEntity): Long = 1L
 

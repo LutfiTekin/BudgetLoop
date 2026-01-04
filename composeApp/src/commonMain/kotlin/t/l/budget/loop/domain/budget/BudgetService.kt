@@ -4,7 +4,6 @@ import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
-import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import t.l.budget.loop.data.db.DailyBudgetStateDao
 import t.l.budget.loop.data.db.DailyBudgetStateEntity
@@ -30,26 +29,35 @@ class BudgetService(
         date: LocalDate,
         timeZone: TimeZone,
     ): DailyBudgetStateEntity {
-        dailyBudgetStateDao.getByDate(date)?.let { return it }
-
         val settings = settingsDao.get() ?: error("Settings must be initialized before budgeting.")
-        val carryMinor = previousCarry(date)
-        val spentTodayMinor = spentForDate(date, timeZone)
-        val remainingMinor = engine.calculateDailyRemaining(
-            dailyBudgetMinor = settings.dailyBudgetMinor,
-            carryMinor = carryMinor,
-            spentTodayMinor = spentTodayMinor,
-        )
+        val startOfMonth = LocalDate(date.year, date.monthNumber, 1)
+        var carryMinor = 0L
+        var currentDate = startOfMonth
+        var latestState: DailyBudgetStateEntity? = null
 
-        val state = DailyBudgetStateEntity(
-            date = date,
-            dailyBudgetMinor = settings.dailyBudgetMinor,
-            carryMinor = carryMinor,
-            remainingMinor = remainingMinor,
-            monthlySavedMinor = 0L,
-        )
-        dailyBudgetStateDao.upsert(state)
-        return state
+        while (currentDate <= date) {
+            val spentTodayMinor = spentForDate(currentDate, timeZone)
+            val remainingMinor = engine.calculateDailyRemaining(
+                dailyBudgetMinor = settings.dailyBudgetMinor,
+                carryMinor = carryMinor,
+                spentTodayMinor = spentTodayMinor,
+            )
+            val existingState = dailyBudgetStateDao.getByDate(currentDate)
+            val state = DailyBudgetStateEntity(
+                date = currentDate,
+                dailyBudgetMinor = settings.dailyBudgetMinor,
+                carryMinor = carryMinor,
+                remainingMinor = remainingMinor,
+                monthlySavedMinor = existingState?.monthlySavedMinor ?: 0L,
+            )
+            dailyBudgetStateDao.upsert(state)
+            latestState = state
+
+            carryMinor = if (engine.isLastDayOfMonth(currentDate)) 0L else remainingMinor
+            currentDate = currentDate.plus(DatePeriod(days = 1))
+        }
+
+        return latestState ?: error("Failed to compute daily budget state for $date.")
     }
 
     suspend fun applyEndOfDay(
@@ -72,12 +80,6 @@ class BudgetService(
         )
         dailyBudgetStateDao.upsert(state.copy(monthlySavedMinor = savedMinor))
         return MonthEndResult(date = date, savedMinor = savedMinor)
-    }
-
-    private suspend fun previousCarry(date: LocalDate): Long {
-        val previousDate = date.minus(DatePeriod(days = 1))
-        val previousState = dailyBudgetStateDao.getByDate(previousDate) ?: return 0L
-        return if (engine.isLastDayOfMonth(previousDate)) 0L else previousState.remainingMinor
     }
 
     private suspend fun spentForDate(date: LocalDate, timeZone: TimeZone): Long {

@@ -33,15 +33,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atStartOfDayIn
-import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
+import t.l.budget.loop.data.db.DailyBudgetStateDao
+import t.l.budget.loop.data.db.SavingsEntryDao
+import t.l.budget.loop.data.db.SettingsDao
 import t.l.budget.loop.data.db.TransactionDao
 import t.l.budget.loop.data.db.TransactionEntity
+import t.l.budget.loop.domain.budget.BudgetService
 import t.l.budget.loop.domain.transactions.TransactionService
 import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
@@ -68,6 +69,9 @@ data class SavingsEntryDraft(
 fun MainApp(
     onboardingData: OnboardingData,
     transactionDao: TransactionDao,
+    settingsDao: SettingsDao,
+    dailyBudgetStateDao: DailyBudgetStateDao,
+    savingsEntryDao: SavingsEntryDao,
 ) {
     var screen by remember { mutableStateOf(MainScreen.TANK) }
     var showMonthlySummary by remember { mutableStateOf(false) }
@@ -75,19 +79,26 @@ fun MainApp(
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
     val scope = rememberCoroutineScope()
     val transactionService = remember(transactionDao) { TransactionService(transactionDao) }
+    val budgetService = remember(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao) {
+        BudgetService(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao)
+    }
     var transactions by remember { mutableStateOf<List<TransactionEntity>>(emptyList()) }
-    var spentTodayMinor by remember { mutableStateOf(0L) }
     val currency = normalizeCurrencyCode(onboardingData.currency.ifBlank { "USD" })
-    val dailyBudgetMinor = parseMinor(onboardingData.dailyBudget, currency) ?: 0L
-    val dailyBudget = Money.of(dailyBudgetMinor, currency)
-    val remaining = Money.of(dailyBudget.minor - spentTodayMinor, currency)
+    val defaultDailyBudgetMinor = parseMinor(onboardingData.dailyBudget, currency) ?: 0L
+    var dailyBudgetMinor by remember { mutableStateOf(defaultDailyBudgetMinor) }
+    var carryMinor by remember { mutableStateOf(0L) }
+    var remainingMinor by remember { mutableStateOf(defaultDailyBudgetMinor) }
+    val dailyAllowanceMinor = dailyBudgetMinor + carryMinor
+    val dailyAllowance = Money.of(dailyAllowanceMinor, currency)
+    val remaining = Money.of(remainingMinor, currency)
     val timeZone = TimeZone.currentSystemDefault()
 
     suspend fun loadTransactions() {
         val today = currentLocalDate(timeZone)
-        val start = today.atStartOfDayIn(timeZone)
-        val endExclusive = today.plus(DatePeriod(days = 1)).atStartOfDayIn(timeZone)
-        spentTodayMinor = transactionDao.sumDefaultBetween(start, endExclusive)
+        val state = budgetService.ensureDailyState(today, timeZone)
+        dailyBudgetMinor = state.dailyBudgetMinor
+        carryMinor = state.carryMinor
+        remainingMinor = state.remainingMinor
         transactions = transactionDao.listAll()
     }
 
@@ -98,9 +109,10 @@ fun MainApp(
     Box(modifier = Modifier.fillMaxSize()) {
         when (screen) {
             MainScreen.TANK -> TankScreen(
-                dailyBudget = dailyBudget,
+                dailyAllowance = dailyAllowance,
                 remaining = remaining,
                 transactions = transactions,
+                timeZone = timeZone,
                 onShowMonthlySummary = { showMonthlySummary = true },
             )
             MainScreen.SAVINGS -> SavingsTrackerScreen(
@@ -117,6 +129,7 @@ fun MainApp(
         if (showAddExpenseDialog) {
             AddExpenseDialog(
                 defaultCurrency = currency,
+                dailyLimitMinor = dailyAllowanceMinor.coerceAtLeast(0L),
                 onSave = { amountMinor, note ->
                     scope.launch {
                         val amount = Money.of(amountMinor, currency)
@@ -200,15 +213,16 @@ private fun FabMenu(
 
 @Composable
 private fun TankScreen(
-    dailyBudget: Money,
+    dailyAllowance: Money,
     remaining: Money,
     transactions: List<TransactionEntity>,
+    timeZone: TimeZone,
     onShowMonthlySummary: () -> Unit,
 ) {
-    val progress = if (dailyBudget.minor <= 0L) {
+    val progress = if (dailyAllowance.minor <= 0L) {
         0f
     } else {
-        (remaining.minor.toFloat() / dailyBudget.minor.toFloat()).coerceIn(0f, 1f)
+        (remaining.minor.toFloat() / dailyAllowance.minor.toFloat()).coerceIn(0f, 1f)
     }
     val fillColor = when {
         progress > 0.6f -> MutedPurple
@@ -244,6 +258,7 @@ private fun TankScreen(
         }
         TransactionHistory(
             transactions = transactions,
+            timeZone = timeZone,
             modifier = Modifier.align(Alignment.Center),
         )
     }
@@ -252,8 +267,10 @@ private fun TankScreen(
 @Composable
 private fun TransactionHistory(
     transactions: List<TransactionEntity>,
+    timeZone: TimeZone,
     modifier: Modifier = Modifier,
 ) {
+    val today = currentLocalDate(timeZone)
     Column(
         modifier = modifier
             .fillMaxWidth(0.85f)
@@ -269,15 +286,23 @@ private fun TransactionHistory(
             Text("No transactions yet.", style = MaterialTheme.typography.bodySmall)
         } else {
             transactions.forEach { transaction ->
+                val dateLabel = formatTransactionDateLabel(transaction.date, today, timeZone)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        transaction.note?.ifBlank { "No note" } ?: "No note",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            transaction.note?.ifBlank { "No note" } ?: "No note",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            dateLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         Money.of(transaction.amountMinor, transaction.currency).format(),
                         style = MaterialTheme.typography.bodySmall,
@@ -291,24 +316,22 @@ private fun TransactionHistory(
 @Composable
 private fun AddExpenseDialog(
     defaultCurrency: String,
+    dailyLimitMinor: Long,
     onSave: (Long, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var amount by remember { mutableStateOf("") }
+    var amountMinor by remember { mutableStateOf(0L) }
     var note by remember { mutableStateOf("") }
-    val amountMinor = parseMinor(amount, defaultCurrency)
-    val canSave = amountMinor != null
-    val showAmountError = amount.isNotBlank() && amountMinor == null
+    val canSave = amountMinor > 0L
 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             Button(
                 onClick = {
-                    val minor = amountMinor ?: return@Button
                     val cleanedNote = note.trim().ifBlank { null }
-                    onSave(minor, cleanedNote)
-                    amount = ""
+                    onSave(amountMinor, cleanedNote)
+                    amountMinor = 0L
                     note = ""
                     onDismiss()
                 },
@@ -328,20 +351,13 @@ private fun AddExpenseDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                TextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    label = { Text("Amount ($defaultCurrency)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
+                CylindricalNumberPicker(
+                    currentAmountMinor = amountMinor,
+                    dailyLimitMinor = dailyLimitMinor,
+                    currency = defaultCurrency,
+                    onAmountChange = { amountMinor = it },
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                if (showAmountError) {
-                    Text(
-                        "Enter a valid amount.",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
                 TextField(
                     value = note,
                     onValueChange = { note = it },

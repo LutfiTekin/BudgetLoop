@@ -85,6 +85,9 @@ fun App() {
                     MainApp(
                         onboardingData = state.data,
                         transactionDao = database.transactionDao(),
+                        settingsDao = database.settingsDao(),
+                        dailyBudgetStateDao = database.dailyBudgetStateDao(),
+                        savingsEntryDao = database.savingsEntryDao(),
                     )
                 }
             }
