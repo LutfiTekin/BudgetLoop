@@ -372,11 +372,14 @@ private fun TankScreen(
                     bankingState = BankingState.FILLING
                     val fillJob = bankScope.launch {
                         try {
-                            bankProgress.snapTo(0f)
+                            val startProgress = bankProgress.value.coerceIn(0f, 1f)
+                            val remainingDurationMs = (
+                                requiredDurationMs.toDouble() * (1.0 - startProgress.toDouble())
+                            ).roundToLong().coerceAtLeast(1L)
                             bankProgress.animateTo(
                                 1f,
                                 animationSpec = tween(
-                                    durationMillis = requiredDurationMs.toInt(),
+                                    durationMillis = remainingDurationMs.toInt(),
                                     easing = LinearEasing,
                                 ),
                             )
@@ -409,7 +412,7 @@ private fun TankScreen(
                             bankProgress.animateTo(
                                 0f,
                                 animationSpec = tween(
-                                    durationMillis = 250,
+                                    durationMillis = 3000,
                                     easing = LinearEasing,
                                 ),
                             )
