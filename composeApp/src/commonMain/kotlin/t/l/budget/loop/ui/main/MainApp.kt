@@ -41,6 +41,10 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -55,6 +59,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -177,14 +182,14 @@ fun MainApp(
             AddExpenseDialog(
                 defaultCurrency = currency,
                 dailyLimitMinor = dailyAllowanceMinor.coerceAtLeast(0L),
-                onSave = { amountMinor, note ->
+                onSave = { amountMinor, note, date ->
                     scope.launch {
                         val amount = Money.of(amountMinor, currency)
-                        val nowInstant = nowInstant()
+                        val transactionInstant = date.atStartOfDayIn(timeZone)
                         transactionService.addExpense(
                             amount = amount,
                             amountDefault = amount,
-                            date = nowInstant,
+                            date = transactionInstant,
                             note = note,
                             category = DefaultExpenseCategory,
                         )
@@ -304,7 +309,7 @@ private fun TankScreen(
         }
     }
     val canBank by remember {
-        derivedStateOf { activeCarryAmount.minor > 0L }
+        derivedStateOf { activeCarryAmount.minor > 0L && activeRemaining.minor >= dailyBudget.minor }
     }
     val requiredDurationMs by remember {
         derivedStateOf {
@@ -690,11 +695,14 @@ private fun WaveOverlay(
 private fun AddExpenseDialog(
     defaultCurrency: String,
     dailyLimitMinor: Long,
-    onSave: (Long, String?) -> Unit,
+    onSave: (Long, String?, LocalDate) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var amountMinor by remember { mutableStateOf(0L) }
     var note by remember { mutableStateOf("") }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var selectedDate by remember { mutableStateOf(currentLocalDate(TimeZone.currentSystemDefault())) }
+
     val canSave = amountMinor > 0L
 
     AlertDialog(
@@ -703,7 +711,7 @@ private fun AddExpenseDialog(
             Button(
                 onClick = {
                     val cleanedNote = note.trim().ifBlank { null }
-                    onSave(amountMinor, cleanedNote)
+                    onSave(amountMinor, cleanedNote, selectedDate)
                     amountMinor = 0L
                     note = ""
                     onDismiss()
@@ -731,12 +739,35 @@ private fun AddExpenseDialog(
                     onAmountChange = { amountMinor = it },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                TextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("Note (optional)") },
-                    singleLine = true,
-                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text("Note (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { showDatePicker = !showDatePicker }) {
+                        Icon(
+                            imageVector = Icons.Filled.DateRange,
+                            contentDescription = "Select Date"
+                        )
+                    }
+                }
+                
+                if (showDatePicker) {
+                    val maxDate = currentLocalDate(TimeZone.currentSystemDefault())
+                    TransactionDatePicker(
+                        date = selectedDate,
+                        onDateChange = { selectedDate = it },
+                        maxDate = maxDate,
+                        modifier = Modifier.fillMaxWidth().height(140.dp), // Increased height slightly
+                    )
+                }
             }
         },
     )
