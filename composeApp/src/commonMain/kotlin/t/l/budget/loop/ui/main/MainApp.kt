@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
@@ -46,8 +47,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isUnspecified
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -71,6 +74,7 @@ import t.l.budget.loop.ui.theme.GrayLavender
 import t.l.budget.loop.ui.theme.MutedPurple
 import t.l.budget.loop.ui.theme.SoftViolet
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToLong
@@ -267,26 +271,18 @@ private fun TankScreen(
     onBankingStateChange: (Boolean) -> Unit,
     onShowMonthlySummary: () -> Unit,
 ) {
-    val progress = if (dailyBudget.minor <= 0L) {
-        0f
-    } else {
-        (remaining.minor.toFloat() / dailyBudget.minor.toFloat()).coerceIn(0f, 1f)
-    }
-    val fillColor = when {
-        progress > 0.6f -> MutedPurple
-        progress > 0.3f -> SoftViolet
-        else -> GrayLavender
-    }
     val baseColor = MaterialTheme.colorScheme.background
     val haptics = rememberHapticFeedbackManager()
     val onBankCarryOverState by rememberUpdatedState(onBankCarryOver)
     val onBankingStateChangeState by rememberUpdatedState(onBankingStateChange)
     val latestCarryAmount by rememberUpdatedState(carryAmount)
+    val latestRemaining by rememberUpdatedState(remaining)
     val bankScope = rememberCoroutineScope()
     val bankProgress = remember { Animatable(0f) }
     var bankingState by remember { mutableStateOf(BankingState.IDLE) }
     var bankedAmount by remember { mutableStateOf<Money?>(null) }
     var lockedCarryAmount by remember { mutableStateOf<Money?>(null) }
+    var lockedRemaining by remember { mutableStateOf<Money?>(null) }
     var showSuccessDialog by remember { mutableStateOf(false) }
 
     val activeCarryAmount by remember {
@@ -295,6 +291,15 @@ private fun TankScreen(
                 latestCarryAmount
             } else {
                 lockedCarryAmount ?: latestCarryAmount
+            }
+        }
+    }
+    val activeRemaining by remember {
+        derivedStateOf {
+            if (bankingState == BankingState.IDLE) {
+                latestRemaining
+            } else {
+                lockedRemaining ?: latestRemaining
             }
         }
     }
@@ -317,31 +322,63 @@ private fun TankScreen(
     val isBankingActive by remember {
         derivedStateOf { focusProgress > 0f || bankingState != BankingState.IDLE }
     }
+    val previewCarryMinorExact by remember {
+        derivedStateOf { activeCarryAmount.minor.toDouble() * focusProgress }
+    }
+    val previewCarryMinor by remember {
+        derivedStateOf { previewCarryMinorExact.roundToLong() }
+    }
     val contentAlpha by remember {
         derivedStateOf { (1f - focusProgress).coerceIn(0f, 1f) }
     }
-    val displayAmountMinor by remember {
+    val displayAmountMinorExact by remember {
         derivedStateOf {
-            if (bankingState == BankingState.FILLING) {
-                (activeCarryAmount.minor.toDouble() * focusProgress).roundToLong()
+            if (bankingState == BankingState.FILLING) previewCarryMinorExact else activeCarryAmount.minor.toDouble()
+        }
+    }
+    val displayAmountMinor by remember {
+        derivedStateOf { displayAmountMinorExact.roundToLong() }
+    }
+    val displayRemainingMinor by remember {
+        derivedStateOf {
+            val baseRemainingMinor = activeRemaining.minor
+            val deltaMinor = when (bankingState) {
+                BankingState.FILLING -> previewCarryMinor
+                BankingState.SUCCESS_DRAINING -> activeCarryAmount.minor
+                BankingState.IDLE -> if (focusProgress > 0f) previewCarryMinor else 0L
+            }
+            baseRemainingMinor - deltaMinor
+        }
+    }
+    val displayRemaining = Money.of(displayRemainingMinor, activeRemaining.currency)
+    val progress by remember {
+        derivedStateOf {
+            if (dailyBudget.minor <= 0L) {
+                0f
             } else {
-                activeCarryAmount.minor
+                (displayRemainingMinor.toFloat() / dailyBudget.minor.toFloat()).coerceIn(0f, 1f)
             }
         }
     }
-    val displayAmount = Money.of(displayAmountMinor, activeCarryAmount.currency)
+    val fillColor = when {
+        progress > 0.6f -> MutedPurple
+        progress > 0.3f -> SoftViolet
+        else -> GrayLavender
+    }
 
     LaunchedEffect(canBank) {
         if (!canBank && bankingState == BankingState.IDLE) {
             bankingState = BankingState.IDLE
             bankProgress.snapTo(0f)
             lockedCarryAmount = null
+            lockedRemaining = null
         }
     }
 
     LaunchedEffect(bankingState) {
         if (bankingState == BankingState.IDLE) {
             lockedCarryAmount = null
+            lockedRemaining = null
         }
     }
 
@@ -369,6 +406,7 @@ private fun TankScreen(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     if (!canBank || bankingState != BankingState.IDLE) return@awaitEachGesture
                     lockedCarryAmount = latestCarryAmount
+                    lockedRemaining = latestRemaining
                     bankingState = BankingState.FILLING
                     val fillJob = bankScope.launch {
                         try {
@@ -441,7 +479,7 @@ private fun TankScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text("Daily Remaining", style = MaterialTheme.typography.titleSmall)
-                Text(remaining.format(), style = MaterialTheme.typography.headlineMedium)
+                Text(displayRemaining.format(), style = MaterialTheme.typography.headlineMedium)
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedButton(onClick = onShowMonthlySummary) {
                     Text("Monthly summary")
@@ -461,9 +499,11 @@ private fun TankScreen(
             modifier = Modifier.fillMaxSize(),
         )
         if (bankingState != BankingState.IDLE) {
-            Text(
-                text = displayAmount.format(),
-                style = MaterialTheme.typography.headlineLarge,
+            BankingAmountDial(
+                amountMinor = displayAmountMinor,
+                maxMinor = activeCarryAmount.minor,
+                currency = activeCarryAmount.currency,
+                textStyle = MaterialTheme.typography.headlineLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -532,6 +572,74 @@ private fun TransactionHistory(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BankingAmountDial(
+    amountMinor: Long,
+    maxMinor: Long,
+    currency: String,
+    textStyle: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val fractionDigits = CurrencyMeta.fractionDigits(currency)
+    val factorLong = pow10(fractionDigits)
+    val absAmountMinor = abs(amountMinor)
+    val limitMinor = maxMinor.coerceAtLeast(0L)
+
+    val limitMinorInt = limitMinor.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val absAmountMinorInt = absAmountMinor.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val limitMajorInt = (limitMinor / factorLong).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+    val dialStyle = textStyle.copy(color = color)
+    val currencyStyle = if (textStyle.fontSize.isUnspecified) {
+        textStyle
+    } else {
+        textStyle.copy(fontSize = textStyle.fontSize * 0.6f)
+    }
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (amountMinor < 0) {
+            Text("-", style = dialStyle)
+        }
+        
+        val majorValue = (absAmountMinor / factorLong).toInt().coerceIn(0, limitMajorInt)
+        PhysicsWheelPicker(
+            range = 0..limitMajorInt,
+            value = majorValue,
+            onValueChange = {},
+            textStyle = dialStyle,
+            enabled = false,
+            itemHeight = 56.dp,
+            modifier = Modifier.width(140.dp),
+        )
+        
+        if (fractionDigits > 0) {
+            Text(".", style = dialStyle)
+            PhysicsWheelPicker(
+                range = 0..limitMinorInt,
+                value = absAmountMinorInt,
+                onValueChange = {},
+                textStyle = dialStyle,
+                enabled = false,
+                animateOnValueChange = false,
+                itemHeight = 56.dp,
+                modifier = Modifier.width((56 * fractionDigits).dp),
+                label = { (it % factorLong).toString().padStart(fractionDigits, '0') },
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = normalizeCurrencyCode(currency),
+            style = currencyStyle,
+            color = color,
+        )
     }
 }
 

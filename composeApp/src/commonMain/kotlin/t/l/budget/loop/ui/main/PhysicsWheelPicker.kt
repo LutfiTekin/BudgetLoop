@@ -49,6 +49,8 @@ fun PhysicsWheelPicker(
     itemHeight: Dp = 44.dp,
     visibleItemsCount: Int = 5,
     textStyle: TextStyle,
+    enabled: Boolean = true,
+    animateOnValueChange: Boolean = true,
     label: (Int) -> String = { it.toString() },
 ) {
     val density = LocalDensity.current
@@ -63,7 +65,12 @@ fun PhysicsWheelPicker(
     val onValueChangeState by rememberUpdatedState(onValueChange)
     val haptics = rememberHapticFeedbackManager()
     val interactionSource = remember { MutableInteractionSource() }
-    val isDragged by interactionSource.collectIsDraggedAsState()
+    val isDraggedState = if (enabled) {
+        interactionSource.collectIsDraggedAsState()
+    } else {
+        remember { mutableStateOf(false) }
+    }
+    val isDragged by isDraggedState
     var positionPx by remember(minIndex, maxIndex, itemHeightPx) {
         mutableFloatStateOf(clampedValue * itemHeightPx)
     }
@@ -91,9 +98,14 @@ fun PhysicsWheelPicker(
         }
     }
 
-    LaunchedEffect(clampedValue, itemHeightPx, minIndex, maxIndex, isDragged, selectedIndex) {
-        if (isDragged || clampedValue == selectedIndex) return@LaunchedEffect
+    LaunchedEffect(clampedValue, itemHeightPx, minIndex, maxIndex, isDragged, selectedIndex, animateOnValueChange) {
+        if (isDragged) return@LaunchedEffect
         val target = clampedValue * itemHeightPx
+        if (!animateOnValueChange) {
+            positionPx = target
+            return@LaunchedEffect
+        }
+        if (clampedValue == selectedIndex) return@LaunchedEffect
         if (abs(positionPx - target) < 0.5f) {
             positionPx = target
             return@LaunchedEffect
@@ -107,13 +119,10 @@ fun PhysicsWheelPicker(
     }
 
     var hapticsArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(selectedIndex) {
+    LaunchedEffect(selectedIndex, enabled) {
         onValueChangeState(selectedIndex)
-        if (hapticsArmed) {
-            haptics.tick()
-        } else {
-            hapticsArmed = true
-        }
+        if (!enabled) return@LaunchedEffect
+        if (hapticsArmed) haptics.tick() else hapticsArmed = true
     }
 
     val scrollableState = rememberScrollableState { delta ->
@@ -144,16 +153,22 @@ fun PhysicsWheelPicker(
         }
     }
 
+    val scrollModifier = if (enabled) {
+        Modifier.scrollable(
+            orientation = Orientation.Vertical,
+            state = scrollableState,
+            flingBehavior = flingBehavior,
+            interactionSource = interactionSource,
+        )
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
             .height(itemHeight * adjustedVisibleCount)
             .clipToBounds()
-            .scrollable(
-                orientation = Orientation.Vertical,
-                state = scrollableState,
-                flingBehavior = flingBehavior,
-                interactionSource = interactionSource,
-            ),
+            .then(scrollModifier),
     ) {
         val viewportHeightPx = itemHeightPx * adjustedVisibleCount
         val centerY = viewportHeightPx / 2f
