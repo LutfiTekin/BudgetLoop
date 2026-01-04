@@ -2,6 +2,7 @@ package t.l.budget.loop.data.db
 
 enum class SavingsSource {
     MONTH_END,
+    CARRY_OVER,
     MANUAL,
 }
 

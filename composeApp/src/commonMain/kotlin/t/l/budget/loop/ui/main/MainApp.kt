@@ -1,6 +1,16 @@
 package t.l.budget.loop.ui.main
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +22,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -22,16 +36,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -44,17 +62,30 @@ import t.l.budget.loop.data.db.TransactionDao
 import t.l.budget.loop.data.db.TransactionEntity
 import t.l.budget.loop.domain.budget.BudgetService
 import t.l.budget.loop.domain.transactions.TransactionService
+import t.l.budget.loop.money.CurrencyMeta
 import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
+import t.l.budget.loop.platform.rememberHapticFeedbackManager
 import t.l.budget.loop.ui.onboarding.OnboardingData
 import t.l.budget.loop.ui.theme.GrayLavender
 import t.l.budget.loop.ui.theme.MutedPurple
 import t.l.budget.loop.ui.theme.SoftViolet
+import kotlin.math.PI
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToLong
+import kotlin.math.sin
 import kotlin.time.Clock
 
 private enum class MainScreen {
     TANK,
     SAVINGS,
+}
+
+private enum class BankingState {
+    IDLE,
+    FILLING,
+    SUCCESS_DRAINING,
 }
 
 private const val DefaultExpenseCategory = "Food"
@@ -76,6 +107,7 @@ fun MainApp(
     var screen by remember { mutableStateOf(MainScreen.TANK) }
     var showMonthlySummary by remember { mutableStateOf(false) }
     var showAddExpenseDialog by remember { mutableStateOf(false) }
+    var isBanking by remember { mutableStateOf(false) }
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
     val scope = rememberCoroutineScope()
     val transactionService = remember(transactionDao) { TransactionService(transactionDao) }
@@ -91,6 +123,7 @@ fun MainApp(
     val dailyAllowanceMinor = dailyBudgetMinor + carryMinor
     val dailyBudget = Money.of(dailyBudgetMinor, currency)
     val remaining = Money.of(remainingMinor, currency)
+    val carryAmount = Money.of(carryMinor, currency)
     val timeZone = TimeZone.currentSystemDefault()
 
     suspend fun loadTransactions() {
@@ -106,13 +139,23 @@ fun MainApp(
         loadTransactions()
     }
 
+    suspend fun bankCarryOver(): Money {
+        val today = currentLocalDate(timeZone)
+        val banked = budgetService.bankCarryOver(today, timeZone)
+        loadTransactions()
+        return banked
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (screen) {
             MainScreen.TANK -> TankScreen(
                 dailyBudget = dailyBudget,
                 remaining = remaining,
+                carryAmount = carryAmount,
                 transactions = transactions,
                 timeZone = timeZone,
+                onBankCarryOver = { bankCarryOver() },
+                onBankingStateChange = { isBanking = it },
                 onShowMonthlySummary = { showMonthlySummary = true },
             )
             MainScreen.SAVINGS -> SavingsTrackerScreen(
@@ -147,20 +190,22 @@ fun MainApp(
                 onDismiss = { showAddExpenseDialog = false },
             )
         }
-        FabMenu(
-            current = screen,
-            onNavigate = { target ->
-                screen = target
-                if (target != MainScreen.TANK) {
+        if (!(screen == MainScreen.TANK && isBanking)) {
+            FabMenu(
+                current = screen,
+                onNavigate = { target ->
+                    screen = target
+                    if (target != MainScreen.TANK) {
+                        showMonthlySummary = false
+                    }
+                },
+                onAddExpense = {
                     showMonthlySummary = false
-                }
-            },
-            onAddExpense = {
-                showMonthlySummary = false
-                showAddExpenseDialog = true
-            },
-            modifier = Modifier.align(Alignment.BottomEnd),
-        )
+                    showAddExpenseDialog = true
+                },
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
     }
 }
 
@@ -215,8 +260,11 @@ private fun FabMenu(
 private fun TankScreen(
     dailyBudget: Money,
     remaining: Money,
+    carryAmount: Money,
     transactions: List<TransactionEntity>,
     timeZone: TimeZone,
+    onBankCarryOver: suspend () -> Money,
+    onBankingStateChange: (Boolean) -> Unit,
     onShowMonthlySummary: () -> Unit,
 ) {
     val progress = if (dailyBudget.minor <= 0L) {
@@ -230,11 +278,146 @@ private fun TankScreen(
         else -> GrayLavender
     }
     val baseColor = MaterialTheme.colorScheme.background
+    val haptics = rememberHapticFeedbackManager()
+    val onBankCarryOverState by rememberUpdatedState(onBankCarryOver)
+    val onBankingStateChangeState by rememberUpdatedState(onBankingStateChange)
+    val latestCarryAmount by rememberUpdatedState(carryAmount)
+    val bankScope = rememberCoroutineScope()
+    val bankProgress = remember { Animatable(0f) }
+    var bankingState by remember { mutableStateOf(BankingState.IDLE) }
+    var bankedAmount by remember { mutableStateOf<Money?>(null) }
+    var lockedCarryAmount by remember { mutableStateOf<Money?>(null) }
+    var showSuccessDialog by remember { mutableStateOf(false) }
+
+    val activeCarryAmount by remember {
+        derivedStateOf {
+            if (bankingState == BankingState.IDLE) {
+                latestCarryAmount
+            } else {
+                lockedCarryAmount ?: latestCarryAmount
+            }
+        }
+    }
+    val canBank by remember {
+        derivedStateOf { activeCarryAmount.minor > 0L }
+    }
+    val requiredDurationMs by remember {
+        derivedStateOf {
+            val fractionDigits = CurrencyMeta.fractionDigits(activeCarryAmount.currency)
+            val factor = pow10(fractionDigits).toDouble()
+            val amountMajor = activeCarryAmount.minor.toDouble() / factor
+            val extraSeconds = max(0.0, (amountMajor - 5.0) / 5.0)
+            val durationMs = (5000.0 + extraSeconds * 1000.0).roundToLong()
+            min(durationMs, 20_000L)
+        }
+    }
+    val focusProgress by remember {
+        derivedStateOf { bankProgress.value.coerceIn(0f, 1f) }
+    }
+    val isBankingActive by remember {
+        derivedStateOf { focusProgress > 0f || bankingState != BankingState.IDLE }
+    }
+    val contentAlpha by remember {
+        derivedStateOf { (1f - focusProgress).coerceIn(0f, 1f) }
+    }
+    val displayAmountMinor by remember {
+        derivedStateOf {
+            if (bankingState == BankingState.FILLING) {
+                (activeCarryAmount.minor.toDouble() * focusProgress).roundToLong()
+            } else {
+                activeCarryAmount.minor
+            }
+        }
+    }
+    val displayAmount = Money.of(displayAmountMinor, activeCarryAmount.currency)
+
+    LaunchedEffect(canBank) {
+        if (!canBank && bankingState == BankingState.IDLE) {
+            bankingState = BankingState.IDLE
+            bankProgress.snapTo(0f)
+            lockedCarryAmount = null
+        }
+    }
+
+    LaunchedEffect(bankingState) {
+        if (bankingState == BankingState.IDLE) {
+            lockedCarryAmount = null
+        }
+    }
+
+    LaunchedEffect(isBankingActive) {
+        onBankingStateChangeState(isBankingActive)
+    }
+
+    LaunchedEffect(bankingState) {
+        if (bankingState != BankingState.FILLING) {
+            return@LaunchedEffect
+        }
+        while (isActive && bankingState == BankingState.FILLING) {
+            val intervalMs = ((1f - focusProgress) * 120f + 30f).roundToLong()
+            haptics.tick()
+            delay(intervalMs.coerceAtLeast(20L))
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(baseColor),
+            .background(baseColor)
+            .pointerInput(canBank, requiredDurationMs) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (!canBank || bankingState != BankingState.IDLE) return@awaitEachGesture
+                    lockedCarryAmount = latestCarryAmount
+                    bankingState = BankingState.FILLING
+                    val fillJob = bankScope.launch {
+                        try {
+                            bankProgress.snapTo(0f)
+                            bankProgress.animateTo(
+                                1f,
+                                animationSpec = tween(
+                                    durationMillis = requiredDurationMs.toInt(),
+                                    easing = LinearEasing,
+                                ),
+                            )
+                            if (bankProgress.value >= 1f && bankingState == BankingState.FILLING) {
+                                val banked = onBankCarryOverState()
+                                bankedAmount = banked
+                                bankingState = BankingState.SUCCESS_DRAINING
+                                bankProgress.animateTo(
+                                    0f,
+                                    animationSpec = tween(
+                                        durationMillis = 1000,
+                                        easing = LinearEasing,
+                                    ),
+                                )
+                                bankingState = BankingState.IDLE
+                                showSuccessDialog = true
+                            }
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            bankingState = BankingState.IDLE
+                            bankProgress.snapTo(0f)
+                        }
+                    }
+                    waitForUpOrCancellation()
+                    if (bankingState == BankingState.FILLING && bankProgress.value < 1f) {
+                        fillJob.cancel()
+                        bankingState = BankingState.IDLE
+                        bankScope.launch {
+                            bankProgress.animateTo(
+                                0f,
+                                animationSpec = tween(
+                                    durationMillis = 250,
+                                    easing = LinearEasing,
+                                ),
+                            )
+                        }
+                    }
+                    down.consume()
+                }
+            },
     ) {
         Box(
             modifier = Modifier
@@ -243,24 +426,60 @@ private fun TankScreen(
                 .align(Alignment.BottomCenter)
                 .background(fillColor),
         )
-        Column(
+        Box(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxSize()
+                .alpha(contentAlpha),
         ) {
-            Text("Daily Remaining", style = MaterialTheme.typography.titleSmall)
-            Text(remaining.format(), style = MaterialTheme.typography.headlineMedium)
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedButton(onClick = onShowMonthlySummary) {
-                Text("Monthly summary")
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("Daily Remaining", style = MaterialTheme.typography.titleSmall)
+                Text(remaining.format(), style = MaterialTheme.typography.headlineMedium)
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(onClick = onShowMonthlySummary) {
+                    Text("Monthly summary")
+                }
+            }
+            if (!isBankingActive) {
+                TransactionHistory(
+                    transactions = transactions,
+                    timeZone = timeZone,
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
         }
-        TransactionHistory(
-            transactions = transactions,
-            timeZone = timeZone,
-            modifier = Modifier.align(Alignment.Center),
+        WaveOverlay(
+            progress = focusProgress,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxSize(),
         )
+        if (bankingState != BankingState.IDLE) {
+            Text(
+                text = displayAmount.format(),
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+        val resolvedBankedAmount = bankedAmount
+        if (showSuccessDialog && resolvedBankedAmount != null) {
+            AlertDialog(
+                onDismissRequest = { showSuccessDialog = false },
+                confirmButton = {
+                    Button(onClick = { showSuccessDialog = false }) {
+                        Text("OK")
+                    }
+                },
+                title = { Text("Banked!") },
+                text = {
+                    Text("You successfully banked ${resolvedBankedAmount.format()}.")
+                },
+            )
+        }
     }
 }
 
@@ -310,6 +529,49 @@ private fun TransactionHistory(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WaveOverlay(
+    progress: Float,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val clampedProgress = progress.coerceIn(0f, 1f)
+    val infiniteTransition = rememberInfiniteTransition()
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2f * PI.toFloat()),
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = 2000,
+                easing = LinearEasing,
+            ),
+        ),
+    )
+
+    Canvas(modifier = modifier) {
+        if (clampedProgress <= 0f) return@Canvas
+        val baseY = size.height * (1f - clampedProgress)
+        val amplitude = size.height * 0.02f
+        val waveLength = size.width * 0.75f
+        val frequency = if (waveLength == 0f) 0f else (2f * PI.toFloat()) / waveLength
+        val step = (size.width / 32f).coerceAtLeast(6f)
+
+        val path = Path()
+        path.moveTo(0f, size.height)
+        path.lineTo(size.width, size.height)
+        path.lineTo(size.width, baseY)
+
+        var x = size.width
+        while (x >= 0f) {
+            val y = baseY + amplitude * sin((frequency * x + phase).toDouble()).toFloat()
+            path.lineTo(x, y)
+            x -= step
+        }
+        path.close()
+        drawPath(path, color)
     }
 }
 
@@ -470,4 +732,10 @@ private fun parseMinor(amount: String, currency: String): Long? {
     val cleaned = amount.trim().replace(",", ".")
     val value = cleaned.toDoubleOrNull() ?: return null
     return Money.fromDecimal(value, currency).minor
+}
+
+private fun pow10(exp: Int): Long {
+    var result = 1L
+    repeat(exp) { result *= 10L }
+    return result
 }
