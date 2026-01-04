@@ -89,7 +89,7 @@ fun MainApp(
     var carryMinor by remember { mutableStateOf(0L) }
     var remainingMinor by remember { mutableStateOf(defaultDailyBudgetMinor) }
     val dailyAllowanceMinor = dailyBudgetMinor + carryMinor
-    val dailyAllowance = Money.of(dailyAllowanceMinor, currency)
+    val dailyBudget = Money.of(dailyBudgetMinor, currency)
     val remaining = Money.of(remainingMinor, currency)
     val timeZone = TimeZone.currentSystemDefault()
 
@@ -109,7 +109,7 @@ fun MainApp(
     Box(modifier = Modifier.fillMaxSize()) {
         when (screen) {
             MainScreen.TANK -> TankScreen(
-                dailyAllowance = dailyAllowance,
+                dailyBudget = dailyBudget,
                 remaining = remaining,
                 transactions = transactions,
                 timeZone = timeZone,
@@ -213,16 +213,16 @@ private fun FabMenu(
 
 @Composable
 private fun TankScreen(
-    dailyAllowance: Money,
+    dailyBudget: Money,
     remaining: Money,
     transactions: List<TransactionEntity>,
     timeZone: TimeZone,
     onShowMonthlySummary: () -> Unit,
 ) {
-    val progress = if (dailyAllowance.minor <= 0L) {
+    val progress = if (dailyBudget.minor <= 0L) {
         0f
     } else {
-        (remaining.minor.toFloat() / dailyAllowance.minor.toFloat()).coerceIn(0f, 1f)
+        (remaining.minor.toFloat() / dailyBudget.minor.toFloat()).coerceIn(0f, 1f)
     }
     val fillColor = when {
         progress > 0.6f -> MutedPurple
