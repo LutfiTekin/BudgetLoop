@@ -124,9 +124,15 @@ class BudgetService(
         return Money.of(carryMinor, settings.defaultCurrency)
     }
 
-    private suspend fun spentForDate(date: LocalDate, timeZone: TimeZone): Long {
+    suspend fun spentForDate(date: LocalDate, timeZone: TimeZone): Long {
         val start = date.atStartOfDayIn(timeZone)
         val endExclusive = date.plus(DatePeriod(days = 1)).atStartOfDayIn(timeZone)
         return transactionDao.sumDefaultBetween(start, endExclusive)
+    }
+
+    suspend fun getTotalSaved(): Money {
+        val totalMinor = savingsEntryDao.sumTotal()
+        val settings = settingsDao.get() ?: error("Settings must be initialized.")
+        return Money.of(totalMinor, settings.defaultCurrency)
     }
 }

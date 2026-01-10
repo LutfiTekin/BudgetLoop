@@ -104,4 +104,7 @@ interface SavingsEntryDao {
 
     @Delete
     suspend fun delete(entry: SavingsEntryEntity)
+
+    @Query("SELECT COALESCE(SUM(amountMinor), 0) FROM savings_entries")
+    suspend fun sumTotal(): Long
 }

@@ -27,7 +27,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
@@ -141,17 +146,25 @@ fun MainApp(
         dailyBudgetMinor = state.dailyBudgetMinor
         carryMinor = state.carryMinor
         remainingMinor = state.remainingMinor
+        remainingMinor = state.remainingMinor
         transactions = transactionDao.listAll()
     }
 
-    LaunchedEffect(transactionDao) {
+    var totalSaved by remember { mutableStateOf(Money.of(0, currency)) }
+
+    suspend fun loadData() {
         loadTransactions()
+        totalSaved = budgetService.getTotalSaved()
+    }
+
+    LaunchedEffect(transactionDao) {
+        loadData()
     }
 
     suspend fun bankCarryOver(): Money {
         val today = currentLocalDate(timeZone)
         val banked = budgetService.bankCarryOver(today, timeZone)
-        loadTransactions()
+        loadData()
         return banked
     }
 
@@ -169,6 +182,7 @@ fun MainApp(
             )
             MainScreen.SAVINGS -> SavingsTrackerScreen(
                 defaultCurrency = currency,
+                totalSaved = totalSaved,
                 entries = savingsEntries,
             )
         }
@@ -193,7 +207,7 @@ fun MainApp(
                             note = note,
                             category = DefaultExpenseCategory,
                         )
-                        loadTransactions()
+                        loadData()
                     }
                 },
                 onDismiss = { showAddExpenseDialog = false },
@@ -406,65 +420,71 @@ private fun TankScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(baseColor)
-            .pointerInput(canBank, requiredDurationMs) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    if (!canBank || bankingState != BankingState.IDLE) return@awaitEachGesture
-                    lockedCarryAmount = latestCarryAmount
-                    lockedRemaining = latestRemaining
-                    bankingState = BankingState.FILLING
-                    val fillJob = bankScope.launch {
-                        try {
-                            val startProgress = bankProgress.value.coerceIn(0f, 1f)
-                            val remainingDurationMs = (
-                                requiredDurationMs.toDouble() * (1.0 - startProgress.toDouble())
-                            ).roundToLong().coerceAtLeast(1L)
-                            bankProgress.animateTo(
-                                1f,
-                                animationSpec = tween(
-                                    durationMillis = remainingDurationMs.toInt(),
-                                    easing = LinearEasing,
-                                ),
-                            )
-                            if (bankProgress.value >= 1f && bankingState == BankingState.FILLING) {
-                                val banked = onBankCarryOverState()
-                                bankedAmount = banked
-                                bankingState = BankingState.SUCCESS_DRAINING
+    ) {
+        // Gesture Detector Layer (Background)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(canBank, requiredDurationMs) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        if (!canBank || bankingState != BankingState.IDLE) return@awaitEachGesture
+                        lockedCarryAmount = latestCarryAmount
+                        lockedRemaining = latestRemaining
+                        bankingState = BankingState.FILLING
+                        val fillJob = bankScope.launch {
+                            try {
+                                val startProgress = bankProgress.value.coerceIn(0f, 1f)
+                                val remainingDurationMs = (
+                                    requiredDurationMs.toDouble() * (1.0 - startProgress.toDouble())
+                                ).roundToLong().coerceAtLeast(1L)
                                 bankProgress.animateTo(
-                                    0f,
+                                    1f,
                                     animationSpec = tween(
-                                        durationMillis = 1000,
+                                        durationMillis = remainingDurationMs.toInt(),
                                         easing = LinearEasing,
                                     ),
                                 )
+                                if (bankProgress.value >= 1f && bankingState == BankingState.FILLING) {
+                                    val banked = onBankCarryOverState()
+                                    bankedAmount = banked
+                                    bankingState = BankingState.SUCCESS_DRAINING
+                                    bankProgress.animateTo(
+                                        0f,
+                                        animationSpec = tween(
+                                            durationMillis = 1000,
+                                            easing = LinearEasing,
+                                        ),
+                                    )
+                                    bankingState = BankingState.IDLE
+                                    showSuccessDialog = true
+                                }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
                                 bankingState = BankingState.IDLE
-                                showSuccessDialog = true
+                                bankProgress.snapTo(0f)
                             }
-                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
+                        }
+                        waitForUpOrCancellation()
+                        if (bankingState == BankingState.FILLING && bankProgress.value < 1f) {
+                            fillJob.cancel()
                             bankingState = BankingState.IDLE
-                            bankProgress.snapTo(0f)
+                            bankScope.launch {
+                                bankProgress.animateTo(
+                                    0f,
+                                    animationSpec = tween(
+                                        durationMillis = 3000,
+                                        easing = LinearEasing,
+                                    ),
+                                )
+                            }
                         }
+                        down.consume()
                     }
-                    waitForUpOrCancellation()
-                    if (bankingState == BankingState.FILLING && bankProgress.value < 1f) {
-                        fillJob.cancel()
-                        bankingState = BankingState.IDLE
-                        bankScope.launch {
-                            bankProgress.animateTo(
-                                0f,
-                                animationSpec = tween(
-                                    durationMillis = 3000,
-                                    easing = LinearEasing,
-                                ),
-                            )
-                        }
-                    }
-                    down.consume()
-                }
-            },
-    ) {
+                },
+        )
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -531,6 +551,8 @@ private fun TankScreen(
     }
 }
 
+
+
 @Composable
 private fun TransactionHistory(
     transactions: List<TransactionEntity>,
@@ -541,6 +563,7 @@ private fun TransactionHistory(
     Column(
         modifier = modifier
             .fillMaxWidth(0.85f)
+            .heightIn(max = 400.dp)
             .background(
                 MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                 MaterialTheme.shapes.medium,
@@ -552,28 +575,33 @@ private fun TransactionHistory(
         if (transactions.isEmpty()) {
             Text("No transactions yet.", style = MaterialTheme.typography.bodySmall)
         } else {
-            transactions.forEach { transaction ->
-                val dateLabel = formatTransactionDateLabel(transaction.date, today, timeZone)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(transactions) { transaction ->
+                    val dateLabel = formatTransactionDateLabel(transaction.date, today, timeZone)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                transaction.note?.ifBlank { "No note" } ?: "No note",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                dateLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
-                            transaction.note?.ifBlank { "No note" } ?: "No note",
+                            Money.of(transaction.amountMinor, transaction.currency).format(),
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        Text(
-                            dateLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
-                    Text(
-                        Money.of(transaction.amountMinor, transaction.currency).format(),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                 }
             }
         }
@@ -776,6 +804,7 @@ private fun AddExpenseDialog(
 @Composable
 private fun SavingsTrackerScreen(
     defaultCurrency: String,
+    totalSaved: Money,
     entries: MutableList<SavingsEntryDraft>,
 ) {
     var amount by remember { mutableStateOf("") }
@@ -788,6 +817,21 @@ private fun SavingsTrackerScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Savings Tracker", style = MaterialTheme.typography.titleLarge)
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Total Saved", style = MaterialTheme.typography.labelMedium)
+                Text(totalSaved.format(), style = MaterialTheme.typography.displayMedium)
+            }
+        }
+        
+        Text("Add Entry (Draft)", style = MaterialTheme.typography.titleMedium)
         TextField(
             value = amount,
             onValueChange = { amount = it },
