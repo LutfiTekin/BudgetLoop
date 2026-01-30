@@ -563,7 +563,7 @@ private fun TransactionHistory(
     Column(
         modifier = modifier
             .fillMaxWidth(0.85f)
-            .heightIn(max = 400.dp)
+            .heightIn(max = 410.dp)
             .background(
                 MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                 MaterialTheme.shapes.medium,
