@@ -20,22 +20,22 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -46,16 +46,16 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -64,9 +64,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
 import t.l.budget.loop.data.db.DailyBudgetStateDao
 import t.l.budget.loop.data.db.SavingsEntryDao
@@ -125,9 +125,10 @@ fun MainApp(
     val savingsEntries = remember { mutableStateListOf<SavingsEntryDraft>() }
     val scope = rememberCoroutineScope()
     val transactionService = remember(transactionDao) { TransactionService(transactionDao) }
-    val budgetService = remember(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao) {
-        BudgetService(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao)
-    }
+    val budgetService =
+        remember(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao) {
+            BudgetService(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao)
+        }
     var transactions by remember { mutableStateOf<List<TransactionEntity>>(emptyList()) }
     val currency = normalizeCurrencyCode(onboardingData.currency.ifBlank { "USD" })
     val defaultDailyBudgetMinor = parseMinor(onboardingData.dailyBudget, currency) ?: 0L
@@ -180,6 +181,7 @@ fun MainApp(
                 onBankingStateChange = { isBanking = it },
                 onShowMonthlySummary = { showMonthlySummary = true },
             )
+
             MainScreen.SAVINGS -> SavingsTrackerScreen(
                 defaultCurrency = currency,
                 totalSaved = totalSaved,
@@ -436,8 +438,8 @@ private fun TankScreen(
                             try {
                                 val startProgress = bankProgress.value.coerceIn(0f, 1f)
                                 val remainingDurationMs = (
-                                    requiredDurationMs.toDouble() * (1.0 - startProgress.toDouble())
-                                ).roundToLong().coerceAtLeast(1L)
+                                        requiredDurationMs.toDouble() * (1.0 - startProgress.toDouble())
+                                        ).roundToLong().coerceAtLeast(1L)
                                 bankProgress.animateTo(
                                     1f,
                                     animationSpec = tween(
@@ -558,7 +560,6 @@ private fun TankScreen(
 }
 
 
-
 @Composable
 private fun TransactionHistory(
     transactions: List<TransactionEntity>,
@@ -647,7 +648,7 @@ private fun BankingAmountDial(
         if (amountMinor < 0) {
             Text("-", style = dialStyle)
         }
-        
+
         val majorValue = (absAmountMinor / factorLong).toInt().coerceIn(0, limitMajorInt)
         PhysicsWheelPicker(
             range = 0..limitMajorInt,
@@ -658,7 +659,7 @@ private fun BankingAmountDial(
             itemHeight = 56.dp,
             modifier = Modifier.width(140.dp),
         )
-        
+
         if (fractionDigits > 0) {
             Text(".", style = dialStyle)
             PhysicsWheelPicker(
@@ -773,7 +774,7 @@ private fun AddExpenseDialog(
                     onAmountChange = { amountMinor = it },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -792,14 +793,15 @@ private fun AddExpenseDialog(
                         )
                     }
                 }
-                
+
                 if (showDatePicker) {
                     val maxDate = currentLocalDate(TimeZone.currentSystemDefault())
                     TransactionDatePicker(
                         date = selectedDate,
                         onDateChange = { selectedDate = it },
                         maxDate = maxDate,
-                        modifier = Modifier.fillMaxWidth().height(140.dp), // Increased height slightly
+                        modifier = Modifier.fillMaxWidth()
+                            .height(140.dp), // Increased height slightly
                     )
                 }
             }
@@ -823,7 +825,7 @@ private fun SavingsTrackerScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Savings Tracker", style = MaterialTheme.typography.titleLarge)
-        
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -836,7 +838,7 @@ private fun SavingsTrackerScreen(
                 Text(totalSaved.format(), style = MaterialTheme.typography.displayMedium)
             }
         }
-        
+
         Text("Add Entry (Draft)", style = MaterialTheme.typography.titleMedium)
         TextField(
             value = amount,
