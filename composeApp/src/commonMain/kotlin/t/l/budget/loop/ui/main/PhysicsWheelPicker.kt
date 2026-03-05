@@ -51,6 +51,7 @@ fun PhysicsWheelPicker(
     textStyle: TextStyle,
     enabled: Boolean = true,
     animateOnValueChange: Boolean = true,
+    scrollMultiplier: Float = 1f,
     label: (Int) -> String = { it.toString() },
 ) {
     val density = LocalDensity.current
@@ -126,19 +127,21 @@ fun PhysicsWheelPicker(
     }
 
     val scrollableState = rememberScrollableState { delta ->
-        val next = positionPx - delta
+        val listDelta = delta * scrollMultiplier
+        val next = positionPx - listDelta
         positionPx = applyRubberBand(next, minPx, maxPx, resistancePx)
         delta
     }
     val decay = remember { exponentialDecay<Float>(frictionMultiplier = 4.6f) }
-    val flingBehavior = remember(decay, itemHeightPx, minPx, maxPx) {
+    val flingBehavior = remember(decay, itemHeightPx, minPx, maxPx, scrollMultiplier) {
         object : FlingBehavior {
             override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
                 var lastValue = 0f
-                AnimationState(0f, initialVelocity).animateDecay(decay) {
+                val listVelocity = initialVelocity * scrollMultiplier
+                AnimationState(0f, listVelocity).animateDecay(decay) {
                     val delta = this.value - lastValue
                     lastValue = this.value
-                    scrollBy(delta)
+                    scrollBy(delta / scrollMultiplier)
                 }
                 val targetIndex = (positionPx / itemHeightPx).roundToInt().coerceIn(minIndex, maxIndex)
                 val target = targetIndex * itemHeightPx

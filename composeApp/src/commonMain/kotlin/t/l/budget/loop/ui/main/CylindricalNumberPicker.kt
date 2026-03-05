@@ -119,6 +119,7 @@ internal fun CylindricalNumberPicker(
                         value.toString().padStart(fractionDigits, '0')
                     },
                     modifier = Modifier.width(90.dp),
+                    scrollMultiplier = 2.5f,
                 )
             }
         }
