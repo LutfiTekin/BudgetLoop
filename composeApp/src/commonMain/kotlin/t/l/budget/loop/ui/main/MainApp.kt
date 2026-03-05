@@ -511,11 +511,17 @@ private fun TankScreen(
                 }
             }
             if (!isBankingActive) {
-                TransactionHistory(
-                    transactions = transactions,
-                    timeZone = timeZone,
-                    modifier = Modifier.align(Alignment.Center),
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 170.dp, bottom = 100.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    TransactionHistory(
+                        transactions = transactions,
+                        timeZone = timeZone,
+                    )
+                }
             }
         }
         WaveOverlay(
@@ -576,7 +582,7 @@ private fun TransactionHistory(
             Text("No transactions yet.", style = MaterialTheme.typography.bodySmall)
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(transactions) { transaction ->
