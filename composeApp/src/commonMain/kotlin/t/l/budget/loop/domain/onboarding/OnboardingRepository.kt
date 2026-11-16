@@ -2,7 +2,11 @@ package t.l.budget.loop.domain.onboarding
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 import t.l.budget.loop.data.db.SettingsDao
 import t.l.budget.loop.data.db.SettingsEntity
 import t.l.budget.loop.money.Money
@@ -28,22 +32,49 @@ class OnboardingRepository(
         }
     }
 
+    suspend fun loadSettings(): SettingsEntity? {
+        return withContext(Dispatchers.Default) { settingsDao.get() }
+    }
+
     suspend fun save(
         data: OnboardingData,
         timezone: TimeZone,
         reportTimeMinutes: Int = DEFAULT_REPORT_TIME_MINUTES,
+        monthlyCapInput: String? = null,
     ): OnboardingSaveResult {
         return withContext(Dispatchers.Default) {
-            val currency = normalizeCurrencyCode(data.currency)
+            val currency = runCatching { normalizeCurrencyCode(data.currency) }.getOrNull()
+                ?: return@withContext OnboardingSaveResult.Error("Enter a valid 3-letter currency code.")
             val dailyBudgetMinor = parseMinor(data.dailyBudget, currency)
                 ?: return@withContext OnboardingSaveResult.Error("Enter a valid daily budget amount.")
+            if (dailyBudgetMinor <= 0L) {
+                return@withContext OnboardingSaveResult.Error("Daily budget must be greater than zero.")
+            }
+
+            val parsedCapMinor = if (monthlyCapInput.isNullOrBlank()) {
+                null
+            } else {
+                val cap = parseMinor(monthlyCapInput, currency)
+                    ?: return@withContext OnboardingSaveResult.Error("Enter a valid monthly cap amount.")
+                if (cap <= 0L) {
+                    return@withContext OnboardingSaveResult.Error("Monthly cap must be greater than zero.")
+                }
+                cap
+            }
+
+            val existing = settingsDao.get()
+            val today = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+                .toLocalDateTime(timezone).date
+            val loopStartDate: LocalDate = existing?.loopStartDate ?: today
 
             settingsDao.upsert(
                 SettingsEntity(
                     defaultCurrency = currency,
                     timezone = timezone.id,
                     dailyBudgetMinor = dailyBudgetMinor,
-                    reportTimeMinutes = reportTimeMinutes,
+                    reportTimeMinutes = reportTimeMinutes.coerceIn(0, 23 * 60 + 59),
+                    monthlyCapMinor = parsedCapMinor ?: existing?.monthlyCapMinor?.takeIf { monthlyCapInput == null },
+                    loopStartDate = loopStartDate,
                 ),
             )
 

@@ -13,6 +13,8 @@ data class SettingsEntity(
     val timezone: String,
     val dailyBudgetMinor: Long,
     val reportTimeMinutes: Int,
+    val monthlyCapMinor: Long? = null,
+    val loopStartDate: LocalDate? = null,
 )
 
 @Entity(
@@ -71,4 +73,23 @@ data class SavingsEntryEntity(
     val date: LocalDate,
     val source: SavingsSource,
     val note: String?,
+    val goalId: Long? = null,
+)
+
+@Entity(
+    tableName = "savings_goals",
+    indices = [
+        Index(value = ["sortOrder"]),
+        Index(value = ["archived"]),
+    ],
+)
+data class SavingsGoalEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val name: String,
+    val targetMinor: Long,
+    val allocatedMinor: Long = 0L,
+    val kind: GoalKind = GoalKind.SAVINGS,
+    val targetDate: LocalDate? = null,
+    val sortOrder: Int = 0,
+    val archived: Boolean = false,
 )

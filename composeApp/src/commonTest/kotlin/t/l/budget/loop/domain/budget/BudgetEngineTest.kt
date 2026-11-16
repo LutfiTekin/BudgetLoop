@@ -20,9 +20,18 @@ class BudgetEngineTest {
     }
 
     @Test
-    fun monthEndSavedFloorsAtZero() {
+    fun monthEndTracksSurplusAndDeficit() {
         assertEquals(250L, engine.monthEndSaved(250L))
-        assertEquals(0L, engine.monthEndSaved(-50L))
+        assertEquals(-50L, engine.monthEndSaved(-50L))
+    }
+
+    @Test
+    fun computesDaysInMonthAndMonthlyCap() {
+        assertEquals(29, engine.daysInMonth(LocalDate(2024, 2, 10)))
+        assertEquals(28, engine.daysInMonth(LocalDate(2025, 2, 10)))
+        assertEquals(30, engine.daysInMonth(LocalDate(2026, 11, 16)))
+        assertEquals(54_000L, engine.effectiveMonthlyCapMinor(1800L, null, LocalDate(2026, 11, 16)))
+        assertEquals(54_800L, engine.effectiveMonthlyCapMinor(1800L, 54_800L, LocalDate(2026, 11, 16)))
     }
 
     @Test

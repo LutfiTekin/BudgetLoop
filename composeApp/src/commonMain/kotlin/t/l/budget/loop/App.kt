@@ -84,10 +84,13 @@ fun App() {
                 is AppState.Ready -> {
                     MainApp(
                         onboardingData = state.data,
+                        platformContext = platformContext,
                         transactionDao = database.transactionDao(),
                         settingsDao = database.settingsDao(),
                         dailyBudgetStateDao = database.dailyBudgetStateDao(),
                         savingsEntryDao = database.savingsEntryDao(),
+                        savingsGoalDao = database.savingsGoalDao(),
+                        fxRateDao = database.fxRateDao(),
                     )
                 }
             }

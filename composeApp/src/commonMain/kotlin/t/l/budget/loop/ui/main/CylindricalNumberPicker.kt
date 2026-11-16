@@ -26,7 +26,7 @@ import t.l.budget.loop.money.Money
 @Composable
 internal fun CylindricalNumberPicker(
     currentAmountMinor: Long,
-    dailyLimitMinor: Long,
+    softLimitMinor: Long,
     currency: String,
     onAmountChange: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -34,9 +34,12 @@ internal fun CylindricalNumberPicker(
     val fractionDigits = CurrencyMeta.fractionDigits(currency)
     val factorLong = pow10(fractionDigits)
     val factorInt = factorLong.toInt()
-    val limitMinor = dailyLimitMinor.coerceAtLeast(0L)
-    val majorLimit = (limitMinor / factorLong).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    val minorLimit = (limitMinor % factorLong).toInt()
+    val safeSoftLimit = softLimitMinor.coerceAtLeast(0L)
+    val pickerCeilingMinor = (safeSoftLimit * 2L + factorLong * 50L)
+        .coerceAtLeast(factorLong * 50L)
+        .coerceAtMost(Int.MAX_VALUE.toLong() * factorLong)
+    val majorLimit = (pickerCeilingMinor / factorLong).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    val minorLimit = (pickerCeilingMinor % factorLong).toInt()
     val initialMajor = (currentAmountMinor / factorLong).toInt().coerceIn(0, majorLimit)
     val initialMinor = (currentAmountMinor % factorLong).toInt()
         .coerceIn(0, if (majorLimit == 0) minorLimit else factorInt - 1)
@@ -53,13 +56,12 @@ internal fun CylindricalNumberPicker(
     val baseColor = MaterialTheme.colorScheme.onSurface
     val warningColor = MaterialTheme.colorScheme.error
     val onAmountChangeState by rememberUpdatedState(onAmountChange)
-    val amountColor by remember(baseColor, warningColor, dailyLimitMinor) {
+    val amountColor by remember(baseColor, warningColor, safeSoftLimit) {
         derivedStateOf {
-            val limit = dailyLimitMinor
-            val ratio = if (limit <= 0L) {
+            val ratio = if (safeSoftLimit <= 0L) {
                 if (amountMinor > 0L) 1f else 0f
             } else {
-                ((amountMinor - limit).toFloat() / limit.toFloat()).coerceIn(0f, 1f)
+                ((amountMinor - safeSoftLimit).toFloat() / safeSoftLimit.toFloat()).coerceIn(0f, 1f)
             }
             lerp(baseColor, warningColor, ratio)
         }
@@ -124,9 +126,9 @@ internal fun CylindricalNumberPicker(
             }
         }
         Text(
-            text = "Max ${Money.of(limitMinor, currency).format()}",
+            text = "Loop limit ${Money.of(safeSoftLimit, currency).format()} (warning above)",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (amountMinor > safeSoftLimit) warningColor else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(4.dp))
     }

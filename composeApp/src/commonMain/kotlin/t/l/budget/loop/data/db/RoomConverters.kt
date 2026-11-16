@@ -44,4 +44,14 @@ class RoomConverters {
     fun stringToFxRateSource(value: String?): FxRateSource? {
         return value?.let { FxRateSource.valueOf(it) }
     }
+
+    @TypeConverter
+    fun goalKindToString(value: GoalKind?): String? {
+        return value?.name
+    }
+
+    @TypeConverter
+    fun stringToGoalKind(value: String?): GoalKind? {
+        return value?.let { GoalKind.valueOf(it) }
+    }
 }

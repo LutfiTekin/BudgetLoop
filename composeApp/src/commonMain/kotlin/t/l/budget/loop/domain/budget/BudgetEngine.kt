@@ -1,8 +1,8 @@
 package t.l.budget.loop.domain.budget
 
-import kotlin.math.max
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 
@@ -20,9 +20,26 @@ class BudgetEngine {
     }
 
     fun isLastDayOfMonth(date: LocalDate): Boolean {
-        val firstOfMonth = LocalDate(date.year, date.monthNumber, 1)
+        return date == lastDayOfMonth(date)
+    }
+
+    fun lastDayOfMonth(date: LocalDate): LocalDate {
+        val firstOfMonth = LocalDate(date.year, date.month, 1)
         val firstOfNextMonth = firstOfMonth.plus(DatePeriod(months = 1))
-        val lastOfMonth = firstOfNextMonth.minus(DatePeriod(days = 1))
-        return date == lastOfMonth
+        return firstOfNextMonth.minus(DatePeriod(days = 1))
+    }
+
+    fun daysInMonth(date: LocalDate): Int {
+        val firstOfMonth = LocalDate(date.year, date.month, 1)
+        val firstOfNextMonth = firstOfMonth.plus(DatePeriod(months = 1))
+        return firstOfMonth.daysUntil(firstOfNextMonth)
+    }
+
+    fun effectiveMonthlyCapMinor(
+        dailyBudgetMinor: Long,
+        customCapMinor: Long?,
+        date: LocalDate,
+    ): Long {
+        return customCapMinor?.takeIf { it > 0L } ?: (dailyBudgetMinor * daysInMonth(date))
     }
 }

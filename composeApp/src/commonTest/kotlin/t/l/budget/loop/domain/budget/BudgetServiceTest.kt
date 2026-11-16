@@ -2,15 +2,22 @@ package t.l.budget.loop.domain.budget
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
 import t.l.budget.loop.data.db.DailyBudgetStateDao
 import t.l.budget.loop.data.db.DailyBudgetStateEntity
+import t.l.budget.loop.data.db.GoalKind
 import t.l.budget.loop.data.db.SavingsEntryDao
 import t.l.budget.loop.data.db.SavingsEntryEntity
+import t.l.budget.loop.data.db.SavingsGoalDao
+import t.l.budget.loop.data.db.SavingsGoalEntity
+import t.l.budget.loop.data.db.SavingsSource
 import t.l.budget.loop.data.db.SettingsDao
 import t.l.budget.loop.data.db.SettingsEntity
 import t.l.budget.loop.data.db.TransactionDao
@@ -160,6 +167,128 @@ class BudgetServiceTest {
         val refreshed = service.ensureDailyState(date, TimeZone.UTC)
         assertEquals(500L, refreshed.monthlySavedMinor)
     }
+
+    @Test
+    fun loopStartDatePreventsPhantomPreOnboardingCarry() = runTest {
+        val startDate = LocalDate(2026, 11, 16)
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "EUR",
+                timezone = "UTC",
+                dailyBudgetMinor = 1800L,
+                reportTimeMinutes = 1200,
+                monthlyCapMinor = 54_800L,
+                loopStartDate = startDate,
+            ),
+        )
+        val transactionDao = FakeTransactionDao { _, _ -> 0L }
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
+
+        val state = service.ensureDailyState(startDate, TimeZone.UTC)
+        assertEquals(0L, state.carryMinor)
+        assertEquals(1800L, state.remainingMinor)
+    }
+
+    @Test
+    fun infuseCarryOverCreditsGoalsWithCascadeOverflow() = runTest {
+        val startDate = LocalDate(2026, 11, 15)
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "EUR",
+                timezone = "UTC",
+                dailyBudgetMinor = 1800L,
+                reportTimeMinutes = 1200,
+                loopStartDate = startDate,
+            ),
+        )
+        val transactionDao = FakeTransactionDao { start, _ ->
+            val date = start.toLocalDateTime(TimeZone.UTC).date
+            if (date == startDate) 1000L else 0L
+        }
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val goalDao = FakeSavingsGoalDao(
+            mutableListOf(
+                SavingsGoalEntity(id = 1L, name = "Card Paydown", targetMinor = 500L, allocatedMinor = 0L, kind = GoalKind.DEBT_PAYDOWN, sortOrder = 0),
+                SavingsGoalEntity(id = 2L, name = "Move Fund", targetMinor = 5000L, allocatedMinor = 0L, kind = GoalKind.SAVINGS, sortOrder = 1),
+            ),
+        )
+        val service = BudgetService(
+            settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine(), goalDao,
+        )
+
+        val infused = service.infuseCarryOver(LocalDate(2026, 11, 16), TimeZone.UTC)
+        assertEquals(800L, infused.amount.minor)
+        assertEquals("Card Paydown", infused.creditedGoalName)
+        assertEquals(500L, goalDao.getById(1L)?.allocatedMinor)
+        assertEquals(300L, goalDao.getById(2L)?.allocatedMinor)
+        assertEquals(1800L, dailyDao.getByDate(LocalDate(2026, 11, 16))?.remainingMinor)
+    }
+
+    @Test
+    fun finalizeMissedMonthEndsClosesPriorMonthOnce() = runTest {
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "EUR",
+                timezone = "UTC",
+                dailyBudgetMinor = 1800L,
+                reportTimeMinutes = 1200,
+                loopStartDate = LocalDate(2026, 10, 30),
+            ),
+        )
+        val transactionDao = FakeTransactionDao { start, _ ->
+            val d = start.toLocalDateTime(TimeZone.UTC).date
+            if (d == LocalDate(2026, 10, 30)) 1000L else 1800L
+        }
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
+
+        val firstClose = service.finalizeMissedMonthEnds(LocalDate(2026, 11, 5), TimeZone.UTC)
+        assertNotNull(firstClose)
+        assertEquals(LocalDate(2026, 10, 31), firstClose.date)
+        assertEquals(800L, firstClose.savedMinor)
+
+        val secondClose = service.finalizeMissedMonthEnds(LocalDate(2026, 11, 5), TimeZone.UTC)
+        assertNull(secondClose)
+        assertEquals(1, savingsDao.entries.count { it.source == SavingsSource.MONTH_END })
+    }
+
+    @Test
+    fun loopMonthStatsComputesSpendCustomCapAndStreak() = runTest {
+        val startDate = LocalDate(2026, 11, 14)
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "EUR",
+                timezone = "UTC",
+                dailyBudgetMinor = 1800L,
+                reportTimeMinutes = 1200,
+                monthlyCapMinor = 54_800L,
+                loopStartDate = startDate,
+            ),
+        )
+        val txInstant = LocalDate(2026, 11, 15).atStartOfDayIn(TimeZone.UTC)
+        val transactionDao = FakeTransactionDao(
+            earliest = txInstant,
+            sumDefaultProvider = { start, end ->
+                val s = start.toLocalDateTime(TimeZone.UTC).date
+                val e = end.toLocalDateTime(TimeZone.UTC).date
+                if (LocalDate(2026, 11, 15) >= s && LocalDate(2026, 11, 15) < e) 1500L else 0L
+            },
+        )
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
+
+        val today = LocalDate(2026, 11, 16)
+        service.ensureDailyState(today, TimeZone.UTC)
+        val stats = service.getLoopMonthStats(today, TimeZone.UTC)
+        assertEquals(1500L, stats.spentThisMonthMinor)
+        assertEquals(54_800L, stats.monthlyCapMinor)
+        assertEquals(3, stats.cleanStreakDays)
+    }
 }
 
 private class FakeSettingsDao(
@@ -173,6 +302,7 @@ private class FakeSettingsDao(
 }
 
 private class FakeTransactionDao(
+    private val earliest: Instant? = null,
     private val sumDefaultProvider: (Instant, Instant) -> Long,
 ) : TransactionDao {
     override suspend fun getById(id: Long): TransactionEntity? = null
@@ -184,6 +314,8 @@ private class FakeTransactionDao(
     override suspend fun sumDefaultBetween(start: Instant, endExclusive: Instant): Long {
         return sumDefaultProvider(start, endExclusive)
     }
+
+    override suspend fun earliestDate(): Instant? = earliest
 
     override suspend fun insert(transaction: TransactionEntity): Long = 1L
 
@@ -200,6 +332,8 @@ private class FakeDailyBudgetStateDao : DailyBudgetStateDao {
         return states.values.maxByOrNull { it.date }
     }
 
+    override suspend fun earliestDate(): LocalDate? = states.keys.minOrNull()
+
     override suspend fun upsert(state: DailyBudgetStateEntity) {
         states[state.date] = state
     }
@@ -209,6 +343,14 @@ private class FakeSavingsEntryDao : SavingsEntryDao {
     val entries = mutableListOf<SavingsEntryEntity>()
 
     override suspend fun list(): List<SavingsEntryEntity> = entries.toList()
+
+    override suspend fun findBySourceAndDate(source: SavingsSource, date: LocalDate): SavingsEntryEntity? {
+        return entries.firstOrNull { it.source == source && it.date == date }
+    }
+
+    override suspend fun latestBySource(source: SavingsSource): SavingsEntryEntity? {
+        return entries.filter { it.source == source }.maxByOrNull { it.date }
+    }
 
     override suspend fun insert(entry: SavingsEntryEntity): Long {
         entries.add(entry)
@@ -227,4 +369,33 @@ private class FakeSavingsEntryDao : SavingsEntryDao {
     }
 
     override suspend fun sumTotal(): Long = entries.sumOf { it.amountMinor }
+}
+
+private class FakeSavingsGoalDao(
+    private val items: MutableList<SavingsGoalEntity> = mutableListOf(),
+) : SavingsGoalDao {
+    override suspend fun listActive(): List<SavingsGoalEntity> =
+        items.filter { !it.archived }.sortedWith(compareBy({ it.sortOrder }, { it.id }))
+
+    override suspend fun listAll(): List<SavingsGoalEntity> =
+        items.sortedWith(compareBy({ it.archived }, { it.sortOrder }, { it.id }))
+
+    override suspend fun getById(id: Long): SavingsGoalEntity? = items.firstOrNull { it.id == id }
+
+    override suspend fun nextSortOrder(): Int = (items.maxOfOrNull { it.sortOrder } ?: -1) + 1
+
+    override suspend fun insert(goal: SavingsGoalEntity): Long {
+        val nextId = (items.maxOfOrNull { it.id } ?: 0L) + 1L
+        items.add(goal.copy(id = nextId))
+        return nextId
+    }
+
+    override suspend fun update(goal: SavingsGoalEntity) {
+        val idx = items.indexOfFirst { it.id == goal.id }
+        if (idx >= 0) items[idx] = goal
+    }
+
+    override suspend fun delete(goal: SavingsGoalEntity) {
+        items.removeAll { it.id == goal.id }
+    }
 }

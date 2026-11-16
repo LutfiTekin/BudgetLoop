@@ -13,7 +13,9 @@ actual fun createDatabase(platformContext: PlatformContext): BudgetLoopDatabase 
         platformContext,
         BudgetLoopDatabase::class.java,
         DATABASE_NAME,
-    ).build()
+    )
+        .addMigrations(BudgetLoopDatabase.MIGRATION_1_2)
+        .build()
 }
 
 private const val DATABASE_NAME = "budgetloop.db"

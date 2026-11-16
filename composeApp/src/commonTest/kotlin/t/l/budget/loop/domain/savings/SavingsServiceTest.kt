@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
 import t.l.budget.loop.data.db.SavingsEntryDao
 import t.l.budget.loop.data.db.SavingsEntryEntity
+import t.l.budget.loop.data.db.SavingsSource
 import t.l.budget.loop.money.Money
 
 class SavingsServiceTest {
@@ -39,6 +40,14 @@ private class FakeSavingsEntryDao : SavingsEntryDao {
     private var nextId = 1L
 
     override suspend fun list(): List<SavingsEntryEntity> = entries.toList()
+
+    override suspend fun findBySourceAndDate(source: SavingsSource, date: LocalDate): SavingsEntryEntity? {
+        return entries.firstOrNull { it.source == source && it.date == date }
+    }
+
+    override suspend fun latestBySource(source: SavingsSource): SavingsEntryEntity? {
+        return entries.filter { it.source == source }.maxByOrNull { it.date }
+    }
 
     override suspend fun insert(entry: SavingsEntryEntity): Long {
         val stored = entry.copy(id = nextId++)

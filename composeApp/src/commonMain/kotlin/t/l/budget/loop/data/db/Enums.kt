@@ -10,3 +10,8 @@ enum class FxRateSource {
     MANUAL,
     DEFAULT,
 }
+
+enum class GoalKind {
+    SAVINGS,
+    DEBT_PAYDOWN,
+}

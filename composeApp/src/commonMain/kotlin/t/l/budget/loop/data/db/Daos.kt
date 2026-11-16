@@ -45,6 +45,9 @@ interface TransactionDao {
         endExclusive: Instant,
     ): Long
 
+    @Query("SELECT MIN(date) FROM transactions")
+    suspend fun earliestDate(): Instant?
+
     @Insert
     suspend fun insert(transaction: TransactionEntity): Long
 
@@ -87,14 +90,23 @@ interface DailyBudgetStateDao {
     @Query("SELECT * FROM daily_budget_state ORDER BY date DESC LIMIT 1")
     suspend fun getLatest(): DailyBudgetStateEntity?
 
+    @Query("SELECT MIN(date) FROM daily_budget_state")
+    suspend fun earliestDate(): LocalDate?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(state: DailyBudgetStateEntity)
 }
 
 @Dao
 interface SavingsEntryDao {
-    @Query("SELECT * FROM savings_entries ORDER BY date DESC")
+    @Query("SELECT * FROM savings_entries ORDER BY date DESC, id DESC")
     suspend fun list(): List<SavingsEntryEntity>
+
+    @Query("SELECT * FROM savings_entries WHERE source = :source AND date = :date LIMIT 1")
+    suspend fun findBySourceAndDate(source: SavingsSource, date: LocalDate): SavingsEntryEntity?
+
+    @Query("SELECT * FROM savings_entries WHERE source = :source ORDER BY date DESC, id DESC LIMIT 1")
+    suspend fun latestBySource(source: SavingsSource): SavingsEntryEntity?
 
     @Insert
     suspend fun insert(entry: SavingsEntryEntity): Long
@@ -107,4 +119,28 @@ interface SavingsEntryDao {
 
     @Query("SELECT COALESCE(SUM(amountMinor), 0) FROM savings_entries")
     suspend fun sumTotal(): Long
+}
+
+@Dao
+interface SavingsGoalDao {
+    @Query("SELECT * FROM savings_goals WHERE archived = 0 ORDER BY sortOrder ASC, id ASC")
+    suspend fun listActive(): List<SavingsGoalEntity>
+
+    @Query("SELECT * FROM savings_goals ORDER BY archived ASC, sortOrder ASC, id ASC")
+    suspend fun listAll(): List<SavingsGoalEntity>
+
+    @Query("SELECT * FROM savings_goals WHERE id = :id")
+    suspend fun getById(id: Long): SavingsGoalEntity?
+
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) + 1 FROM savings_goals")
+    suspend fun nextSortOrder(): Int
+
+    @Insert
+    suspend fun insert(goal: SavingsGoalEntity): Long
+
+    @Update
+    suspend fun update(goal: SavingsGoalEntity)
+
+    @Delete
+    suspend fun delete(goal: SavingsGoalEntity)
 }

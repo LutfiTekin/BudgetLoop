@@ -1,17 +1,26 @@
 package t.l.budget.loop.platform
 
-import android.content.Context
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import java.util.concurrent.TimeUnit
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import t.l.budget.loop.domain.budget.BudgetService
+import t.l.budget.loop.money.Money
 import java.util.Calendar
+import java.util.concurrent.TimeUnit
+import kotlin.time.Clock
 
 actual typealias PlatformContext = Context
 
@@ -43,8 +52,9 @@ actual class DailyReportScheduler actual constructor(
     private val platformContext: PlatformContext,
 ) {
     actual fun schedule(reportTimeMinutes: Int) {
-        val hour = reportTimeMinutes / 60
-        val minute = reportTimeMinutes % 60
+        val normalized = reportTimeMinutes.coerceIn(0, 23 * 60 + 59)
+        val hour = normalized / 60
+        val minute = normalized % 60
         val delayMillis = delayUntil(hour, minute)
         val workRequest = PeriodicWorkRequestBuilder<DailyReportWorker>(1, TimeUnit.DAYS)
             .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
@@ -70,7 +80,27 @@ class DailyResetWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
-        return Result.success()
+        val db = createDatabase(applicationContext)
+        return try {
+            val settings = db.settingsDao().get() ?: return Result.success()
+            val tz = runCatching { TimeZone.of(settings.timezone) }.getOrDefault(TimeZone.currentSystemDefault())
+            val today = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+                .toLocalDateTime(tz).date
+            val service = BudgetService(
+                settingsDao = db.settingsDao(),
+                transactionDao = db.transactionDao(),
+                dailyBudgetStateDao = db.dailyBudgetStateDao(),
+                savingsEntryDao = db.savingsEntryDao(),
+                savingsGoalDao = db.savingsGoalDao(),
+            )
+            service.finalizeMissedMonthEnds(today, tz)
+            service.ensureDailyState(today, tz)
+            Result.success()
+        } catch (_: Exception) {
+            Result.retry()
+        } finally {
+            db.close()
+        }
     }
 }
 
@@ -79,8 +109,34 @@ class DailyReportWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
-        showDailyReportNotification(applicationContext)
-        return Result.success()
+        val db = createDatabase(applicationContext)
+        return try {
+            val summaryText = run {
+                val settings = db.settingsDao().get() ?: return@run "Open BudgetLoop to review today's loop."
+                val tz = runCatching { TimeZone.of(settings.timezone) }.getOrDefault(TimeZone.currentSystemDefault())
+                val today = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+                    .toLocalDateTime(tz).date
+                val service = BudgetService(
+                    settingsDao = db.settingsDao(),
+                    transactionDao = db.transactionDao(),
+                    dailyBudgetStateDao = db.dailyBudgetStateDao(),
+                    savingsEntryDao = db.savingsEntryDao(),
+                    savingsGoalDao = db.savingsGoalDao(),
+                )
+                val state = service.ensureDailyState(today, tz)
+                val stats = service.getLoopMonthStats(today, tz)
+                val remText = Money.of(state.remainingMinor, settings.defaultCurrency).format()
+                val spentText = Money.of(stats.spentThisMonthMinor, settings.defaultCurrency).format()
+                val capText = Money.of(stats.monthlyCapMinor, settings.defaultCurrency).format()
+                "Remaining: $remText · Month: $spentText / $capText · Streak: ${stats.cleanStreakDays}d"
+            }
+            showDailyReportNotification(applicationContext, summaryText)
+            Result.success()
+        } catch (_: Exception) {
+            Result.success()
+        } finally {
+            db.close()
+        }
     }
 }
 
@@ -99,21 +155,29 @@ private fun delayUntil(hour: Int, minute: Int): Long {
     return calendar.timeInMillis - now
 }
 
-private fun showDailyReportNotification(context: Context) {
+private fun showDailyReportNotification(context: Context, body: String) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val granted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
+    }
     val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     val channelId = "daily_report"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val channel = NotificationChannel(
             channelId,
-            "Daily Reports",
+            "Daily Loop Reports",
             NotificationManager.IMPORTANCE_DEFAULT,
         )
         manager.createNotificationChannel(channel)
     }
     val notification = NotificationCompat.Builder(context, channelId)
         .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setContentTitle("Daily Report")
-        .setContentText("Your end-of-day summary is ready.")
+        .setContentTitle("Daily Loop Status")
+        .setContentText(body)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
         .setAutoCancel(true)
         .build()
     manager.notify(1001, notification)
