@@ -225,4 +225,6 @@ private class FakeSavingsEntryDao : SavingsEntryDao {
     override suspend fun delete(entry: SavingsEntryEntity) {
         entries.remove(entry)
     }
+
+    override suspend fun sumTotal(): Long = entries.sumOf { it.amountMinor }
 }
