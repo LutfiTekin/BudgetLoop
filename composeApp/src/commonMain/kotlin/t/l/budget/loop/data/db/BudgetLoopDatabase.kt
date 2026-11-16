@@ -19,7 +19,7 @@ import androidx.sqlite.execSQL
         SavingsEntryEntity::class,
         SavingsGoalEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -56,6 +56,14 @@ abstract class BudgetLoopDatabase : RoomDatabase() {
                 )
                 connection.execSQL(
                     "CREATE INDEX IF NOT EXISTS index_savings_goals_archived ON savings_goals (archived)",
+                )
+            }
+        }
+
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE settings ADD COLUMN cycleResetDay INTEGER NOT NULL DEFAULT 1",
                 )
             }
         }

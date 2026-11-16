@@ -19,7 +19,10 @@ actual fun createDatabase(platformContext: PlatformContext): BudgetLoopDatabase 
     )
         .setDriver(BundledSQLiteDriver())
         .setQueryCoroutineContext(kotlinx.coroutines.Dispatchers.Default)
-        .addMigrations(BudgetLoopDatabase.MIGRATION_1_2)
+        .addMigrations(
+            BudgetLoopDatabase.MIGRATION_1_2,
+            BudgetLoopDatabase.MIGRATION_2_3,
+        )
         .build()
 }
 

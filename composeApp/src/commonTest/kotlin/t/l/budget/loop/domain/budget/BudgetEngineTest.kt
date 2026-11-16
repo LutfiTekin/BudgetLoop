@@ -35,6 +35,24 @@ class BudgetEngineTest {
     }
 
     @Test
+    fun resolvesCustomPaydayCycleBoundsAndShortMonthClamping() {
+        val midNovCycle = engine.currentCycle(LocalDate(2026, 11, 16), resetDay = 14)
+        assertEquals(LocalDate(2026, 11, 14), midNovCycle.start)
+        assertEquals(LocalDate(2026, 12, 13), midNovCycle.endInclusive)
+        assertEquals(30, engine.daysInCycle(LocalDate(2026, 11, 16), resetDay = 14))
+        assertTrue(engine.isLastDayOfMonth(LocalDate(2026, 12, 13), resetDay = 14))
+        assertFalse(engine.isLastDayOfMonth(LocalDate(2026, 11, 30), resetDay = 14))
+
+        val prePaydayDecCycle = engine.currentCycle(LocalDate(2026, 12, 5), resetDay = 14)
+        assertEquals(LocalDate(2026, 11, 14), prePaydayDecCycle.start)
+        assertEquals(LocalDate(2026, 12, 13), prePaydayDecCycle.endInclusive)
+
+        val shortFebCycle = engine.currentCycle(LocalDate(2027, 2, 28), resetDay = 31)
+        assertEquals(LocalDate(2027, 2, 28), shortFebCycle.start)
+        assertEquals(LocalDate(2027, 3, 30), shortFebCycle.endInclusive)
+    }
+
+    @Test
     fun detectsLastDayOfMonth() {
         assertTrue(engine.isLastDayOfMonth(LocalDate(2025, 1, 31)))
         assertTrue(engine.isLastDayOfMonth(LocalDate(2024, 2, 29)))

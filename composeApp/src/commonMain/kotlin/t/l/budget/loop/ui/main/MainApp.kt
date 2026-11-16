@@ -644,12 +644,13 @@ private fun TankScreen(
                     val spentMoney = Money.of(monthStats.spentThisMonthMinor, dailyBudget.currency).format()
                     val capMoney = Money.of(monthStats.monthlyCapMinor, dailyBudget.currency).format()
                     val overCap = monthStats.spentThisMonthMinor > monthStats.monthlyCapMinor
+                    val rangeLabel = "${formatShortDayMonth(monthStats.cycleStart)}-${formatShortDayMonth(monthStats.cycleEndInclusive)}"
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         StatusChip(label = "Streak: ${monthStats.cleanStreakDays}d", isWarning = false)
-                        StatusChip(label = "Month: $spentMoney / $capMoney", isWarning = overCap)
+                        StatusChip(label = "$rangeLabel: $spentMoney / $capMoney", isWarning = overCap)
                     }
                 }
 
@@ -1010,8 +1011,9 @@ private fun MonthlySummaryDialog(
                     val spent = Money.of(monthStats.spentThisMonthMinor, currency).format()
                     val cap = Money.of(monthStats.monthlyCapMinor, currency).format()
                     val headroom = Money.of(monthStats.monthlyCapMinor - monthStats.spentThisMonthMinor, currency).format()
-                    Text("Current month spent: $spent / $cap")
-                    Text("Remaining monthly headroom: $headroom")
+                    Text("Active cycle: ${monthStats.cycleStart} -> ${monthStats.cycleEndInclusive}")
+                    Text("Cycle spent: $spent / $cap")
+                    Text("Remaining cycle headroom: $headroom")
                     Text("Current clean streak: ${monthStats.cleanStreakDays} days")
                 }
 
@@ -1040,4 +1042,10 @@ private fun pow10(exp: Int): Long {
     var result = 1L
     repeat(exp) { result *= 10L }
     return result
+}
+
+private fun formatShortDayMonth(date: LocalDate): String {
+    val d = date.dayOfMonth.toString().padStart(2, '0')
+    val m = date.monthNumber.toString().padStart(2, '0')
+    return "$d.$m"
 }

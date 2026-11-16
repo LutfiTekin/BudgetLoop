@@ -26,8 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import t.l.budget.loop.data.db.SettingsEntity
+import t.l.budget.loop.domain.budget.BudgetEngine
 import t.l.budget.loop.domain.onboarding.OnboardingRepository
 import t.l.budget.loop.domain.onboarding.OnboardingSaveResult
 import t.l.budget.loop.money.Money
@@ -35,6 +38,7 @@ import t.l.budget.loop.platform.DailyReportScheduler
 import t.l.budget.loop.platform.DailyResetScheduler
 import t.l.budget.loop.platform.PlatformContext
 import t.l.budget.loop.ui.onboarding.OnboardingData
+import kotlin.time.Clock
 
 @Composable
 internal fun SettingsScreen(
@@ -51,9 +55,11 @@ internal fun SettingsScreen(
         Money.of(it, initialCurrency).format(withCurrency = false)
     }.orEmpty()
     val initialReportMinutes = settings?.reportTimeMinutes ?: OnboardingRepository.DEFAULT_REPORT_TIME_MINUTES
+    val initialResetDay = (settings?.cycleResetDay ?: 1).toString()
 
     var currency by remember(settings) { mutableStateOf(initialCurrency) }
     var dailyBudget by remember(settings) { mutableStateOf(initialDaily) }
+    var cycleResetDay by remember(settings) { mutableStateOf(initialResetDay) }
     var useCustomMonthlyCap by remember(settings) { mutableStateOf(settings?.monthlyCapMinor != null) }
     var monthlyCap by remember(settings) { mutableStateOf(initialCap) }
     var reportHour by remember(settings) { mutableStateOf((initialReportMinutes / 60).toString().padStart(2, '0')) }
@@ -62,6 +68,15 @@ internal fun SettingsScreen(
     var isError by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val currentTimeZone = TimeZone.currentSystemDefault()
+    val engine = remember { BudgetEngine() }
+    val today = remember {
+        Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+            .toLocalDateTime(currentTimeZone).date
+    }
+    val previewCycle = remember(cycleResetDay) {
+        val day = cycleResetDay.toIntOrNull()?.takeIf { it in 1..31 } ?: (settings?.cycleResetDay ?: 1)
+        engine.currentCycle(today, day)
+    }
 
     Column(
         modifier = Modifier
@@ -74,7 +89,7 @@ internal fun SettingsScreen(
     ) {
         Text("Loop Settings", style = MaterialTheme.typography.titleLarge)
         Text(
-            text = "All loop limits are stored locally and can be updated whenever your plan shifts.",
+            text = "All loop limits and cycle dates are stored locally and update your loop immediately.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -96,6 +111,20 @@ internal fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
+        TextField(
+            value = cycleResetDay,
+            onValueChange = { cycleResetDay = it.filter(Char::isDigit).take(2) },
+            label = { Text("Monthly Cycle Reset Day (1-31)") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = "Cycle window: ${previewCycle.start} -> ${previewCycle.endInclusive} (surplus closes after end date)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -105,7 +134,7 @@ internal fun SettingsScreen(
                 onCheckedChange = { useCustomMonthlyCap = it },
             )
             Text(
-                text = "Override monthly spending cap (otherwise Daily × days in month)",
+                text = "Override cycle spending cap (otherwise Daily x days in cycle)",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -114,7 +143,7 @@ internal fun SettingsScreen(
             TextField(
                 value = monthlyCap,
                 onValueChange = { monthlyCap = it },
-                label = { Text("Custom Monthly Cap ($currency)") },
+                label = { Text("Custom Cycle Cap ($currency)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -160,13 +189,19 @@ internal fun SettingsScreen(
 
         Button(
             onClick = {
+                val parsedResetDay = cycleResetDay.toIntOrNull()
+                if (parsedResetDay == null || parsedResetDay !in 1..31) {
+                    isError = true
+                    statusMessage = "Enter a monthly reset day between 1 and 31."
+                    return@Button
+                }
                 val hour = reportHour.toIntOrNull()?.coerceIn(0, 23) ?: 20
                 val minute = reportMinute.toIntOrNull()?.coerceIn(0, 59) ?: 0
                 val totalReportMinutes = hour * 60 + minute
                 val capArgument = if (useCustomMonthlyCap) monthlyCap else ""
                 if (useCustomMonthlyCap && monthlyCap.isBlank()) {
                     isError = true
-                    statusMessage = "Enter a monthly cap or disable the override."
+                    statusMessage = "Enter a cycle cap or disable the override."
                     return@Button
                 }
                 scope.launch {
@@ -176,6 +211,7 @@ internal fun SettingsScreen(
                             timezone = currentTimeZone,
                             reportTimeMinutes = totalReportMinutes,
                             monthlyCapInput = capArgument,
+                            cycleResetDay = parsedResetDay,
                         )
                     ) {
                         is OnboardingSaveResult.Success -> {
@@ -183,7 +219,7 @@ internal fun SettingsScreen(
                             DailyReportScheduler(platformContext).schedule(totalReportMinutes)
                             onSettingsUpdated()
                             isError = false
-                            statusMessage = "Settings saved & daily schedules updated."
+                            statusMessage = "Settings saved & cycle reset day updated."
                         }
                         is OnboardingSaveResult.Error -> {
                             isError = true

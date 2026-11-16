@@ -33,6 +33,8 @@ data class LoopMonthStats(
     val monthlyCapMinor: Long,
     val cleanStreakDays: Int,
     val latestClosedMonthResult: MonthEndResult?,
+    val cycleStart: LocalDate,
+    val cycleEndInclusive: LocalDate,
 )
 
 class BudgetService(
@@ -50,12 +52,19 @@ class BudgetService(
         timeZone: TimeZone,
     ): DailyBudgetStateEntity {
         val settings = settingsDao.get() ?: error("Settings must be initialized before budgeting.")
+        val resetDay = settings.cycleResetDay
+        val cycle = engine.currentCycle(date, resetDay)
         val carryOverDates = savingsEntryDao.list()
             .asSequence()
             .filter { it.source == SavingsSource.CARRY_OVER }
             .map { it.date }
             .toSet()
-        val effectiveStart = resolveMonthCalculationStart(date, timeZone, settings.loopStartDate)
+        val effectiveStart = resolveCycleCalculationStart(
+            cycleStart = cycle.start,
+            date = date,
+            timeZone = timeZone,
+            loopStartDate = settings.loopStartDate,
+        )
         var carryMinor = 0L
         var currentDate = effectiveStart
         var latestState: DailyBudgetStateEntity? = null
@@ -80,7 +89,7 @@ class BudgetService(
             dailyBudgetStateDao.upsert(state)
             latestState = state
 
-            carryMinor = if (engine.isLastDayOfMonth(currentDate)) 0L else remainingMinor
+            carryMinor = if (engine.isLastDayOfMonth(currentDate, resetDay)) 0L else remainingMinor
             currentDate = currentDate.plus(DatePeriod(days = 1))
         }
 
@@ -91,8 +100,9 @@ class BudgetService(
         date: LocalDate,
         timeZone: TimeZone,
     ): MonthEndResult? {
+        val settings = settingsDao.get() ?: error("Settings must be initialized before budgeting.")
         val state = ensureDailyState(date, timeZone)
-        if (!engine.isLastDayOfMonth(date)) {
+        if (!engine.isLastDayOfMonth(date, settings.cycleResetDay)) {
             return null
         }
 
@@ -115,35 +125,36 @@ class BudgetService(
     }
 
     /**
-     * Checks prior months back to the earliest recorded activity and finalizes any missing
-     * month-end summaries so resets still apply even if background workers did not fire.
+     * Checks prior cycles back to the earliest recorded activity and finalizes any missing
+     * cycle-end summaries so resets still apply even if background workers did not fire.
      */
     suspend fun finalizeMissedMonthEnds(
         today: LocalDate,
         timeZone: TimeZone,
     ): MonthEndResult? {
         val settings = settingsDao.get() ?: return null
-        val startOfCurrentMonth = LocalDate(today.year, today.month, 1)
+        val resetDay = settings.cycleResetDay
+        val currentCycle = engine.currentCycle(today, resetDay)
         val earliestCandidates = listOfNotNull(
             settings.loopStartDate,
             dailyBudgetStateDao.earliestDate(),
             transactionDao.earliestDate()?.toLocalDateTime(timeZone)?.date,
         )
         val earliest = earliestCandidates.minOrNull() ?: return null
-        if (earliest >= startOfCurrentMonth) return null
+        if (earliest >= currentCycle.start) return null
 
-        var monthCursor = LocalDate(earliest.year, earliest.month, 1)
+        var cursorCycle = engine.currentCycle(earliest, resetDay)
         var latestNewResult: MonthEndResult? = null
-        while (monthCursor < startOfCurrentMonth) {
-            val monthEnd = engine.lastDayOfMonth(monthCursor)
-            val alreadyRecorded = savingsEntryDao.findBySourceAndDate(SavingsSource.MONTH_END, monthEnd)
+        while (cursorCycle.endInclusive < currentCycle.start) {
+            val cycleEnd = cursorCycle.endInclusive
+            val alreadyRecorded = savingsEntryDao.findBySourceAndDate(SavingsSource.MONTH_END, cycleEnd)
             if (alreadyRecorded == null) {
-                val created = applyEndOfDay(monthEnd, timeZone)
+                val created = applyEndOfDay(cycleEnd, timeZone)
                 if (created != null) {
                     latestNewResult = created
                 }
             }
-            monthCursor = monthCursor.plus(DatePeriod(months = 1))
+            cursorCycle = engine.currentCycle(cycleEnd.plus(DatePeriod(days = 1)), resetDay)
         }
         return latestNewResult
     }
@@ -204,26 +215,30 @@ class BudgetService(
         timeZone: TimeZone,
     ): LoopMonthStats {
         val settings = settingsDao.get() ?: error("Settings must be initialized.")
-        val startOfMonth = LocalDate(today.year, today.month, 1)
-        val startOfNextMonth = startOfMonth.plus(DatePeriod(months = 1))
-        val spentThisMonth = transactionDao.sumDefaultBetween(
-            startOfMonth.atStartOfDayIn(timeZone),
-            startOfNextMonth.atStartOfDayIn(timeZone),
+        val resetDay = settings.cycleResetDay
+        val cycle = engine.currentCycle(today, resetDay)
+        val endExclusive = cycle.endInclusive.plus(DatePeriod(days = 1))
+        val spentInCycle = transactionDao.sumDefaultBetween(
+            cycle.start.atStartOfDayIn(timeZone),
+            endExclusive.atStartOfDayIn(timeZone),
         )
-        val monthlyCap = engine.effectiveMonthlyCapMinor(
+        val cycleCap = engine.effectiveMonthlyCapMinor(
             dailyBudgetMinor = settings.dailyBudgetMinor,
             customCapMinor = settings.monthlyCapMinor,
             date = today,
+            resetDay = resetDay,
         )
-        val streak = computeCleanStreakDays(today, timeZone, settings.loopStartDate)
+        val streak = computeCleanStreakDays(today, cycle.start, settings.loopStartDate)
         val latestClosed = savingsEntryDao.latestBySource(SavingsSource.MONTH_END)?.let {
             MonthEndResult(date = it.date, savedMinor = it.amountMinor)
         }
         return LoopMonthStats(
-            spentThisMonthMinor = spentThisMonth,
-            monthlyCapMinor = monthlyCap,
+            spentThisMonthMinor = spentInCycle,
+            monthlyCapMinor = cycleCap,
             cleanStreakDays = streak,
             latestClosedMonthResult = latestClosed,
+            cycleStart = cycle.start,
+            cycleEndInclusive = cycle.endInclusive,
         )
     }
 
@@ -239,17 +254,17 @@ class BudgetService(
         return Money.of(totalMinor, settings.defaultCurrency)
     }
 
-    private suspend fun resolveMonthCalculationStart(
+    private suspend fun resolveCycleCalculationStart(
+        cycleStart: LocalDate,
         date: LocalDate,
         timeZone: TimeZone,
         loopStartDate: LocalDate?,
     ): LocalDate {
-        val startOfMonth = LocalDate(date.year, date.month, 1)
-        if (loopStartDate == null || loopStartDate <= startOfMonth || loopStartDate > date) {
-            return startOfMonth
+        if (loopStartDate == null || loopStartDate <= cycleStart || loopStartDate > date) {
+            return cycleStart
         }
         val earliestTxnDate = transactionDao.earliestDate()?.toLocalDateTime(timeZone)?.date
-        return if (earliestTxnDate != null && earliestTxnDate >= startOfMonth && earliestTxnDate < loopStartDate) {
+        return if (earliestTxnDate != null && earliestTxnDate >= cycleStart && earliestTxnDate < loopStartDate) {
             earliestTxnDate
         } else {
             loopStartDate
@@ -258,14 +273,13 @@ class BudgetService(
 
     private suspend fun computeCleanStreakDays(
         today: LocalDate,
-        timeZone: TimeZone,
+        cycleStart: LocalDate,
         loopStartDate: LocalDate?,
     ): Int {
-        val startOfMonth = LocalDate(today.year, today.month, 1)
         val floorDate = listOfNotNull(
-            startOfMonth,
+            cycleStart,
             loopStartDate?.takeIf { it <= today },
-        ).maxOrNull() ?: startOfMonth
+        ).maxOrNull() ?: cycleStart
         var cursor = today
         var streak = 0
         while (cursor >= floorDate) {

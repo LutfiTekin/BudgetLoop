@@ -289,6 +289,51 @@ class BudgetServiceTest {
         assertEquals(54_800L, stats.monthlyCapMinor)
         assertEquals(3, stats.cleanStreakDays)
     }
+
+    @Test
+    fun customResetDayRollsAcrossCalendarMonthAndClosesOnCycleEnd() = runTest {
+        val settingsDao = FakeSettingsDao(
+            SettingsEntity(
+                defaultCurrency = "EUR",
+                timezone = "UTC",
+                dailyBudgetMinor = 1800L,
+                reportTimeMinutes = 1200,
+                monthlyCapMinor = 54_800L,
+                loopStartDate = LocalDate(2026, 11, 14),
+                cycleResetDay = 14,
+            ),
+        )
+        val transactionDao = FakeTransactionDao { start, _ ->
+            val d = start.toLocalDateTime(TimeZone.UTC).date
+            if (d == LocalDate(2026, 11, 30)) 1000L else 1800L
+        }
+        val dailyDao = FakeDailyBudgetStateDao()
+        val savingsDao = FakeSavingsEntryDao()
+        val service = BudgetService(settingsDao, transactionDao, dailyDao, savingsDao, BudgetEngine())
+
+        // On calendar month end (Nov 30), surplus MUST continue carrying over under resetDay = 14
+        assertNull(service.applyEndOfDay(LocalDate(2026, 11, 30), TimeZone.UTC))
+        val dec1State = service.ensureDailyState(LocalDate(2026, 12, 1), TimeZone.UTC)
+        assertEquals(800L, dec1State.carryMinor)
+
+        // On cycle end (Dec 13), cycle closes and Dec 14 starts fresh at 0 carry
+        val closed = service.applyEndOfDay(LocalDate(2026, 12, 13), TimeZone.UTC)
+        assertNotNull(closed)
+        assertEquals(LocalDate(2026, 12, 13), closed.date)
+        assertEquals(800L, closed.savedMinor)
+
+        val nextCycleDay1 = service.ensureDailyState(LocalDate(2026, 12, 14), TimeZone.UTC)
+        assertEquals(0L, nextCycleDay1.carryMinor)
+
+        // Missed cycle close on Dec 13 finalizes automatically if checked on Dec 15
+        val savingsDao2 = FakeSavingsEntryDao()
+        val dailyDao2 = FakeDailyBudgetStateDao()
+        val service2 = BudgetService(settingsDao, transactionDao, dailyDao2, savingsDao2, BudgetEngine())
+        val missed = service2.finalizeMissedMonthEnds(LocalDate(2026, 12, 15), TimeZone.UTC)
+        assertNotNull(missed)
+        assertEquals(LocalDate(2026, 12, 13), missed.date)
+        assertEquals(800L, missed.savedMinor)
+    }
 }
 
 private class FakeSettingsDao(

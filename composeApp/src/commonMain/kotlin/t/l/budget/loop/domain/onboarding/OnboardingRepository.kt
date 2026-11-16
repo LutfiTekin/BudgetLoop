@@ -41,6 +41,7 @@ class OnboardingRepository(
         timezone: TimeZone,
         reportTimeMinutes: Int = DEFAULT_REPORT_TIME_MINUTES,
         monthlyCapInput: String? = null,
+        cycleResetDay: Int? = null,
     ): OnboardingSaveResult {
         return withContext(Dispatchers.Default) {
             val currency = runCatching { normalizeCurrencyCode(data.currency) }.getOrNull()
@@ -62,10 +63,15 @@ class OnboardingRepository(
                 cap
             }
 
+            if (cycleResetDay != null && cycleResetDay !in 1..31) {
+                return@withContext OnboardingSaveResult.Error("Reset day must be between 1 and 31.")
+            }
+
             val existing = settingsDao.get()
             val today = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
                 .toLocalDateTime(timezone).date
             val loopStartDate: LocalDate = existing?.loopStartDate ?: today
+            val resolvedResetDay = cycleResetDay ?: existing?.cycleResetDay ?: 1
 
             settingsDao.upsert(
                 SettingsEntity(
@@ -75,6 +81,7 @@ class OnboardingRepository(
                     reportTimeMinutes = reportTimeMinutes.coerceIn(0, 23 * 60 + 59),
                     monthlyCapMinor = parsedCapMinor ?: existing?.monthlyCapMinor?.takeIf { monthlyCapInput == null },
                     loopStartDate = loopStartDate,
+                    cycleResetDay = resolvedResetDay,
                 ),
             )
 

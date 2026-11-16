@@ -15,6 +15,7 @@ data class SettingsEntity(
     val reportTimeMinutes: Int,
     val monthlyCapMinor: Long? = null,
     val loopStartDate: LocalDate? = null,
+    val cycleResetDay: Int = 1,
 )
 
 @Entity(

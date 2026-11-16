@@ -14,7 +14,10 @@ actual fun createDatabase(platformContext: PlatformContext): BudgetLoopDatabase 
         BudgetLoopDatabase::class.java,
         DATABASE_NAME,
     )
-        .addMigrations(BudgetLoopDatabase.MIGRATION_1_2)
+        .addMigrations(
+            BudgetLoopDatabase.MIGRATION_1_2,
+            BudgetLoopDatabase.MIGRATION_2_3,
+        )
         .build()
 }
 
