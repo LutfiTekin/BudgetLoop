@@ -89,6 +89,7 @@ import t.l.budget.loop.money.Money
 import t.l.budget.loop.money.normalizeCurrencyCode
 import t.l.budget.loop.platform.DailyReportScheduler
 import t.l.budget.loop.platform.DailyResetScheduler
+import t.l.budget.loop.platform.PlatformBackHandler
 import t.l.budget.loop.platform.PlatformContext
 import t.l.budget.loop.platform.rememberHapticFeedbackManager
 import t.l.budget.loop.ui.onboarding.OnboardingData
@@ -131,6 +132,10 @@ fun MainApp(
     var showAddExpenseDialog by remember { mutableStateOf(false) }
     var isBanking by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    PlatformBackHandler(enabled = screen != MainScreen.TANK) {
+        screen = MainScreen.TANK
+    }
 
     val transactionService = remember(transactionDao) { TransactionService(transactionDao) }
     val budgetService = remember(settingsDao, transactionDao, dailyBudgetStateDao, savingsEntryDao, savingsGoalDao) {
