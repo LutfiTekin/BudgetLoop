@@ -135,7 +135,7 @@ fun MainApp(
     var dailyBudgetMinor by remember { mutableStateOf(defaultDailyBudgetMinor) }
     var carryMinor by remember { mutableStateOf(0L) }
     var remainingMinor by remember { mutableStateOf(defaultDailyBudgetMinor) }
-    val dailyAllowanceMinor = dailyBudgetMinor + carryMinor
+    val dailyAllowanceMinor = (dailyBudgetMinor + carryMinor) * 2
     val dailyBudget = Money.of(dailyBudgetMinor, currency)
     val remaining = Money.of(remainingMinor, currency)
     val carryAmount = Money.of(carryMinor, currency)
@@ -197,7 +197,7 @@ fun MainApp(
         if (showAddExpenseDialog) {
             AddExpenseDialog(
                 defaultCurrency = currency,
-                dailyLimitMinor = dailyAllowanceMinor.coerceAtLeast(0L),
+                dailyLimitMinor = dailyAllowanceMinor.coerceAtLeast(dailyBudgetMinor),
                 onSave = { amountMinor, note, date ->
                     scope.launch {
                         val amount = Money.of(amountMinor, currency)
